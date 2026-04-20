@@ -40,6 +40,54 @@ class FakeRuntime:
 
 
 class FakeJobs:
+    def __init__(self):
+        self.synced_project = {
+            "id": "project-1",
+            "title": "Ahoj svete.",
+            "text": "Ahoj svete.",
+            "language": "cs",
+            "selected_voice": "speaker.wav",
+            "settings": {"speed": 1.0},
+            "created_at": 1.0,
+            "updated_at": 2.0,
+            "final_audio_path": "/tmp/final.wav",
+            "download_ready": True,
+            "total_blocks": 2,
+            "completed_blocks": 2,
+            "status": "ready",
+            "progress": {"done": 2, "total": 2},
+            "blocks": [
+                {
+                    "index": 0,
+                    "text": "Ahoj",
+                    "voice": "speaker.wav",
+                    "cache_key": "cache-0",
+                    "status": "done",
+                    "error": None,
+                    "audio_path": "/tmp/block-0.wav",
+                    "audio_ready": True,
+                    "duration_ms": 500,
+                    "sample_rate": 22050,
+                    "start_ms": 0,
+                    "end_ms": 500,
+                },
+                {
+                    "index": 1,
+                    "text": "svete.",
+                    "voice": "speaker.wav",
+                    "cache_key": "cache-1",
+                    "status": "done",
+                    "error": None,
+                    "audio_path": "/tmp/block-1.wav",
+                    "audio_ready": True,
+                    "duration_ms": 500,
+                    "sample_rate": 22050,
+                    "start_ms": 500,
+                    "end_ms": 1000,
+                },
+            ],
+        }
+
     def create_job(self, text, options):
         self.created = {"text": text, "options": options.model_dump()}
         return "job-1"
@@ -56,6 +104,26 @@ class FakeJobs:
                 {"index": 0, "text": "Ahoj", "start_ms": 0, "end_ms": 500},
                 {"index": 1, "text": "svete.", "start_ms": 500, "end_ms": 1000},
             ],
+            "blocks": [
+                {
+                    "index": 0,
+                    "text": "Ahoj",
+                    "status": "done",
+                    "error": None,
+                    "audio_path": "/tmp/block-0.wav",
+                    "start_ms": 0,
+                    "end_ms": 500,
+                },
+                {
+                    "index": 1,
+                    "text": "svete.",
+                    "status": "running",
+                    "error": None,
+                    "audio_path": None,
+                    "start_ms": None,
+                    "end_ms": None,
+                },
+            ],
             "final_audio_path": "/tmp/final.wav",
             "error": None,
             "created_at": 1.0,
@@ -65,20 +133,39 @@ class FakeJobs:
     def get_final_audio(self, job_id):
         return b"audio"
 
+    def get_block_audio(self, job_id, block_index):
+        if block_index == 0:
+            return b"block-audio"
+        raise ValueError("running")
+
+    def list_projects(self):
+        return [{"id": "project-1", "title": "Ahoj svete.", "preview": "Ahoj svete.", "created_at": 1.0, "updated_at": 2.0}]
+
+    def sync_project(self, project_id, text, options):
+        self.synced = {"project_id": project_id, "text": text, "options": options.model_dump()}
+        return self.synced_project
+
+    def get_project(self, project_id):
+        return self.synced_project
+
+    def render_project(self, project_id):
+        self.rendered_project = project_id
+        return None
+
 
 class HttpAppTests(unittest.TestCase):
     def setUp(self):
         self.jobs = FakeJobs()
         self.client = TestClient(create_app(runtime=FakeRuntime(), jobs=self.jobs))
 
-    def test_health_reports_omnivoice_render_mode(self):
+    def test_health_reports_omnivoice_progressive_mode(self):
         response = self.client.get("/api/health")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["model"], "k2-fsa/OmniVoice")
-        self.assertEqual(payload["mode"], "render-first")
+        self.assertEqual(payload["mode"], "progressive")
         self.assertEqual(payload["defaults"]["language"], "cs")
 
     def test_voices_endpoint_returns_available_voices(self):
@@ -110,6 +197,9 @@ class HttpAppTests(unittest.TestCase):
         self.assertTrue(payload["audio_ready"])
         self.assertTrue(payload["download_ready"])
         self.assertEqual(len(payload["timeline"]), 2)
+        self.assertEqual(payload["blocks"][0]["status"], "done")
+        self.assertTrue(payload["blocks"][0]["audio_ready"])
+        self.assertFalse(payload["blocks"][1]["audio_ready"])
 
     def test_render_audio_returns_final_wav(self):
         response = self.client.get("/api/render/job-1/audio")
@@ -124,3 +214,36 @@ class HttpAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"audio")
         self.assertIn("attachment", response.headers["content-disposition"])
+
+    def test_block_audio_returns_a_ready_wav_before_the_full_render_finishes(self):
+        response = self.client.get("/api/render/job-1/blocks/0/audio")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"block-audio")
+        self.assertEqual(response.headers["content-type"], "audio/wav")
+
+    def test_projects_endpoint_returns_recent_projects(self):
+        response = self.client.get("/api/projects")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload[0]["id"], "project-1")
+
+    def test_project_sync_persists_reader_state(self):
+        response = self.client.post(
+            "/api/projects/sync",
+            json={"text": "Ahoj svete.", "voice": "speaker.wav", "project_id": "project-1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["id"], "project-1")
+        self.assertEqual(self.jobs.synced["project_id"], "project-1")
+
+    def test_project_render_returns_existing_project_when_all_blocks_are_ready(self):
+        response = self.client.post("/api/projects/project-1/render")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["project"]["id"], "project-1")
