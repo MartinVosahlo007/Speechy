@@ -32,10 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
-
 
 # typescript
 *.tsbuildinfo
@@ -58,32 +58,37 @@ prompt
 server.log
 desktop-dist/
 desktop-logs/
+
+# Python
+**/__pycache__/
+*.py[cod]
+
 # Skills directory
 /skills/
 OmniVoice
 /OmniVoice
-tts-server/__pycache__/
-/tts-server/__pycache__/
+
+# TTS runtime data (local only)
 tts-server/tmp-jobs
 /tts-server/tmp-jobs
+tts-server/tmp-jobs-debug/
 tts-server/voices
 /tts-server/voices
 tts-server/.model-cache/
-/tts-server/__pycache__
-/tts-server/tests/__pycache__
 
-tts-server/application/__pycache__
-tts-server/domain/__pycache__
-tts-server/infrastructure/__pycache__
-tts-server/presentation/__pycache__
+# IDE / tooling
 .playwright-mcp/
 .kilo/
+.windsurf/
 .planner-reviewer/
+.fallow/
+architecture-report.md
 .vscode/
-desktop-dist/
-desktop-logs/
-tts-server/tmp-jobs-debug/
-.codex
+.cursor/*.log
+.codex/*
+!.codex/skills/
+!.codex/skills/**
+.planning/
 .agents/
 
 # Graphify generated output
