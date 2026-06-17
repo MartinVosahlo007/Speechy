@@ -287,6 +287,7 @@ export function useLongFormPlaybackSession({
       const project = await prepareProject(
         buildProjectPreparationInput({
           projectId: state.currentProjectId,
+          provider: state.selectedProvider,
           text: state.text,
           voice: state.selectedVoice,
           blocks: chunks,
@@ -323,6 +324,7 @@ export function useLongFormPlaybackSession({
     state.currentProjectId,
     state.workflowStage,
     state.selectedChunk,
+    state.selectedProvider,
     state.selectedVoice,
     state.serverStatus,
     state.speed,
@@ -399,7 +401,7 @@ export function useLongFormPlaybackSession({
     onVoiceUpload: async (file: File) => {
       dispatch(readerActions.setUploading(true));
       try {
-        const payload = await uploadVoice(file);
+        const payload = await uploadVoice(file, state.selectedProvider);
         await refreshVoices();
         return payload.voice?.name ?? null;
       } finally {

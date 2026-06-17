@@ -6,6 +6,7 @@ import { deleteProject, updateProject } from "../infrastructure/ttsApi";
 import {
   buildResolvedBlockVoices,
   buildUpdatedBlockVoices,
+  persistVoiceAssignmentChange,
   prepareReaderProject,
 } from "./readerProjectCommands";
 import type { ReaderAction } from "./readerActions";
@@ -44,6 +45,75 @@ export function useReaderControllerHandlers({
   refreshProjects,
   clearActiveProjectState,
 }: UseReaderControllerHandlersArgs) {
+  const applyGlobalVoiceChange = async (value: string) => {
+    if (!state.isBlockMode) {
+      dispatch(readerActions.setVoice(value));
+      dispatch(readerActions.setBlockVoices(buildResolvedBlockVoices(paragraphChunks, [], value)));
+      return;
+    }
+
+    const resolvedBlockVoices = buildResolvedBlockVoices(
+      paragraphChunks,
+      state.blockVoices,
+      value,
+    );
+    await persistVoiceAssignmentChange({
+      dispatch,
+      prepareProject: playbackSession.prepareProject,
+      previousSelectedVoice: state.selectedVoice,
+      nextSelectedVoice: value,
+      previousBlockVoices: state.blockVoices,
+      nextBlockVoices: resolvedBlockVoices,
+      projectId: state.currentProjectId,
+      provider: state.selectedProvider,
+      text: state.text,
+      voice: value,
+      speed: state.speed,
+      blocks: paragraphChunks,
+      isBlockMode: state.isBlockMode,
+      fallbackError: "Hlas se nepodařilo změnit.",
+    });
+  };
+
+  const handleBlockVoiceUpload = async (index: number, file: File) => {
+    try {
+      dispatch(readerActions.setError(null));
+      const uploadedVoice = await playbackSession.onVoiceUpload(file);
+      if (!uploadedVoice) return;
+
+      const nextBlockVoices = buildUpdatedBlockVoices(
+        paragraphChunks,
+        state.blockVoices,
+        state.selectedVoice,
+        index,
+        uploadedVoice,
+      );
+      await persistVoiceAssignmentChange({
+        dispatch,
+        prepareProject: playbackSession.prepareProject,
+        previousSelectedVoice: state.selectedVoice,
+        nextSelectedVoice: state.selectedVoice,
+        previousBlockVoices: state.blockVoices,
+        nextBlockVoices,
+        projectId: state.currentProjectId,
+        provider: state.selectedProvider,
+        text: state.text,
+        voice: state.selectedVoice,
+        speed: state.speed,
+        blocks: paragraphChunks,
+        isBlockMode: state.isBlockMode,
+        setWorkflowStageToAssigning: true,
+        fallbackError: "Hlas se nepodařilo nahrát.",
+      });
+    } catch (error) {
+      dispatch(
+        readerActions.setError(
+          error instanceof Error ? error.message : "Hlas se nepodařilo nahrát.",
+        ),
+      );
+    }
+  };
+
   return {
     onTextChange: (value: string) => {
       dispatch(readerActions.setText(value));
@@ -52,26 +122,7 @@ export function useReaderControllerHandlers({
     onSpeedChange: (value: number) => dispatch(readerActions.setSpeed(value)),
     onVolumeChange: (value: number) => dispatch(readerActions.setVolume(value)),
     onTextScaleChange: (value: number) => dispatch(readerActions.setTextScale(value)),
-    onVoiceChange: (value: string) => {
-      dispatch(readerActions.setVoice(value));
-      if (!state.isBlockMode) {
-        dispatch(readerActions.setBlockVoices(buildResolvedBlockVoices(paragraphChunks, [], value)));
-        return;
-      }
-
-      const resolvedBlockVoices = buildResolvedBlockVoices(paragraphChunks, state.blockVoices, state.selectedVoice);
-      if (state.isBlockMode) {
-        void prepareReaderProject({
-          prepareProject: playbackSession.prepareProject,
-          projectId: state.currentProjectId,
-          text: state.text,
-          voice: value,
-          speed: state.speed,
-          blocks: paragraphChunks,
-          blockVoices: resolvedBlockVoices,
-        });
-      }
-    },
+    onVoiceChange: (value: string) => applyGlobalVoiceChange(value),
     onBlockVoiceChange: (index: number, voice: string) => {
       const nextBlockVoices = buildUpdatedBlockVoices(
         paragraphChunks,
@@ -80,19 +131,23 @@ export function useReaderControllerHandlers({
         index,
         voice,
       );
-      dispatch(readerActions.setBlockVoices(nextBlockVoices));
-      dispatch(readerActions.setWorkflowStage("assigning"));
-      if (state.isBlockMode) {
-        void prepareReaderProject({
-          prepareProject: playbackSession.prepareProject,
-          projectId: state.currentProjectId,
-          text: state.text,
-          voice: state.selectedVoice,
-          speed: state.speed,
-          blocks: paragraphChunks,
-          blockVoices: nextBlockVoices,
-        });
-      }
+      return persistVoiceAssignmentChange({
+        dispatch,
+        prepareProject: playbackSession.prepareProject,
+        previousSelectedVoice: state.selectedVoice,
+        nextSelectedVoice: state.selectedVoice,
+        previousBlockVoices: state.blockVoices,
+        nextBlockVoices,
+        projectId: state.currentProjectId,
+        provider: state.selectedProvider,
+        text: state.text,
+        voice: state.selectedVoice,
+        speed: state.speed,
+        blocks: paragraphChunks,
+        isBlockMode: state.isBlockMode,
+        setWorkflowStageToAssigning: true,
+        fallbackError: "Hlas se nepodařilo změnit.",
+      });
     },
     onCopy: () => copyToClipboard(state.text),
     onPlay: playbackSession.onPlay,
@@ -131,33 +186,21 @@ export function useReaderControllerHandlers({
         dispatch(readerActions.setError(error instanceof Error ? error.message : "Projekt se nepodařilo smazat."));
       }
     },
-    onBlockVoiceUpload: async (index: number, file: File) => {
+    onBlockVoiceUpload: handleBlockVoiceUpload,
+    onSelectedVoiceUploadTarget: async (
+      target: "global" | number,
+      file: File,
+    ) => {
+      if (typeof target === "number") {
+        await handleBlockVoiceUpload(target, file);
+        return;
+      }
+
       try {
         dispatch(readerActions.setError(null));
         const uploadedVoice = await playbackSession.onVoiceUpload(file);
         if (!uploadedVoice) return;
-
-        const nextBlockVoices = buildUpdatedBlockVoices(
-          paragraphChunks,
-          state.blockVoices,
-          state.selectedVoice,
-          index,
-          uploadedVoice,
-        );
-        dispatch(readerActions.setBlockVoices(nextBlockVoices));
-        dispatch(readerActions.setWorkflowStage("assigning"));
-
-        if (state.isBlockMode) {
-          await prepareReaderProject({
-            prepareProject: playbackSession.prepareProject,
-            projectId: state.currentProjectId,
-            text: state.text,
-            voice: state.selectedVoice,
-            speed: state.speed,
-            blocks: paragraphChunks,
-            blockVoices: nextBlockVoices,
-          });
-        }
+        await applyGlobalVoiceChange(uploadedVoice);
       } catch (error) {
         dispatch(readerActions.setError(error instanceof Error ? error.message : "Hlas se nepodařilo nahrát."));
       }

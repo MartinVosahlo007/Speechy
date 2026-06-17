@@ -14,6 +14,7 @@ export function VoiceMenu({
   disabled,
   onVoiceChange,
   onUploadClick,
+  uploadLabel,
   uploading = false,
   open,
   onOpenChange,
@@ -26,6 +27,7 @@ export function VoiceMenu({
   disabled: boolean;
   onVoiceChange: (value: string) => void;
   onUploadClick?: () => void;
+  uploadLabel?: string;
   uploading?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -97,7 +99,7 @@ export function VoiceMenu({
                 }}
                 className="reader-dropdown-item frameless-focus border-t border-black/10"
               >
-                <span>{uploading ? "Nahrávám hlas..." : "Přidat hlas..."}</span>
+                <span>{uploading ? "Nahrávám hlas..." : uploadLabel ?? "Přidat hlas..."}</span>
                 <Upload className="h-3.5 w-3.5 shrink-0" />
               </button>
             ) : null}

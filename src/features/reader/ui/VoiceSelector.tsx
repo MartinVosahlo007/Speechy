@@ -8,6 +8,7 @@ export function VoiceSelector({
   voices,
   disabled,
   uploading,
+  uploadLabel,
   onVoiceChange,
   onUploadClick,
 }: {
@@ -15,6 +16,7 @@ export function VoiceSelector({
   voices: Voice[];
   disabled: boolean;
   uploading: boolean;
+  uploadLabel: string;
   onVoiceChange: (value: string) => void;
   onUploadClick: () => void;
 }) {
@@ -27,6 +29,7 @@ export function VoiceSelector({
         voices={voices}
         disabled={disabled}
         onVoiceChange={onVoiceChange}
+        uploadLabel={uploadLabel}
         open={open}
         onOpenChange={setOpen}
         title="Vybrat hlas"
@@ -39,7 +42,7 @@ export function VoiceSelector({
         className="frameless-action frameless-focus"
       >
         <Upload className="h-3 w-3" />
-        <span>{uploading ? "Nahrávám" : "Přidat hlas"}</span>
+        <span>{uploading ? "Nahrávám" : uploadLabel}</span>
       </button>
     </div>
   );

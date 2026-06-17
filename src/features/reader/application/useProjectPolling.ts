@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import type { ProjectSnapshot } from "../domain/types";
+import { debugSessionLog } from "./debugSessionLog";
 import { fetchProject, startProjectRender } from "../infrastructure/ttsApi";
 
 const POLL_INTERVAL_MS = 600;
@@ -30,6 +31,17 @@ function getProjectError(project: ProjectSnapshot) {
   return project.blocks.find((block) => block.error)?.error ?? "Generování projektu selhalo.";
 }
 
+export function getProjectPollSignature(project: ProjectSnapshot) {
+  return [
+    project.status,
+    project.progress.done,
+    project.progress.total,
+    ...project.blocks.map(
+      (block) => `${block.index}:${block.status}:${block.audio_ready ? 1 : 0}:${block.cache_key}`,
+    ),
+  ].join("|");
+}
+
 export function useProjectPolling({
   applyProject,
   tryStartPlayback,
@@ -41,6 +53,7 @@ export function useProjectPolling({
 }: ProjectPollingArgs) {
   const pollTokenRef = useRef(0);
   const lastHandledPollingErrorRef = useRef<string | null>(null);
+  const lastPollSignatureRef = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
     pollTokenRef.current += 1;
@@ -54,8 +67,31 @@ export function useProjectPolling({
     async (projectId: string, token: number) => {
       while (token === pollTokenRef.current) {
         const project = await fetchProject(projectId);
-        applyProject(project);
-        onProjectPolled?.(project, { token, projectId });
+        const signature = getProjectPollSignature(project);
+        const projectChanged = signature !== lastPollSignatureRef.current;
+        lastPollSignatureRef.current = signature;
+
+        if (projectChanged) {
+          debugSessionLog({
+            location: "useProjectPolling.ts:poll",
+            message: "project poll state changed",
+            data: {
+              projectId,
+              status: project.status,
+              done: project.progress.done,
+              total: project.progress.total,
+              blockStatuses: project.blocks.map((block) => ({
+                index: block.index,
+                status: block.status,
+                voice: block.voice,
+                audioReady: block.audio_ready,
+              })),
+            },
+            hypothesisId: "FACT-P1",
+          });
+          applyProject(project);
+          onProjectPolled?.(project, { token, projectId });
+        }
 
         if (project.status === "error") {
           throw new Error(getProjectError(project));
@@ -70,6 +106,11 @@ export function useProjectPolling({
           onRenderRestart?.(project, { projectId, reason });
           const restarted = await startProjectRender(projectId);
           applyProject(restarted.project);
+        }
+
+        if (!projectChanged) {
+          await delay(POLL_INTERVAL_MS);
+          continue;
         }
 
         const started = await tryStartPlayback();
@@ -99,7 +140,9 @@ export function useProjectPolling({
 
   const startPolling = useCallback(
     (projectId: string, source: string) => {
+      pollTokenRef.current += 1;
       const token = pollTokenRef.current;
+      lastPollSignatureRef.current = null;
       void pollProjectUntilReady(projectId, token).catch((error) => {
         handlePollingFailure(error, { projectId, token, source });
       });

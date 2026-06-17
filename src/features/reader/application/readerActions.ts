@@ -1,12 +1,13 @@
-import type { Health, JobStatus, ProjectSummary, ReaderProgress, ServerStatus, Voice } from "../domain/types";
+import type { Health, JobStatus, ProjectSummary, ReaderProgress, ServerStatus, TtsProviderId, Voice } from "../domain/types";
 import type { ReaderWorkflowStage } from "../domain/workflow";
 
 export type ReaderAction =
-  | { type: "settings/loaded"; payload: { text: string; speed: number; volume: number; textScale: number; selectedVoice: string; currentProjectId: string | null } }
+  | { type: "settings/loaded"; payload: { text: string; speed: number; volume: number; textScale: number; selectedProvider: TtsProviderId; selectedVoice: string; currentProjectId: string | null } }
   | { type: "text/set"; payload: string }
   | { type: "speed/set"; payload: number }
   | { type: "volume/set"; payload: number }
   | { type: "textScale/set"; payload: number }
+  | { type: "provider/set"; payload: TtsProviderId }
   | { type: "voice/set"; payload: string }
   | { type: "blockMode/set"; payload: boolean }
   | { type: "blockVoices/set"; payload: string[] }
@@ -31,6 +32,7 @@ export const readerActions = {
   setSpeed: (payload: number) => ({ type: "speed/set", payload }) as const,
   setVolume: (payload: number) => ({ type: "volume/set", payload }) as const,
   setTextScale: (payload: number) => ({ type: "textScale/set", payload }) as const,
+  setProvider: (payload: TtsProviderId) => ({ type: "provider/set", payload }) as const,
   setVoice: (payload: string) => ({ type: "voice/set", payload }) as const,
   setBlockMode: (payload: boolean) => ({ type: "blockMode/set", payload }) as const,
   setBlockVoices: (payload: string[]) => ({ type: "blockVoices/set", payload }) as const,

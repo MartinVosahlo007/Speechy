@@ -10,6 +10,7 @@ export function loadReaderSettings() {
       speed?: number;
       volume?: number;
       textScale?: number;
+      selectedProvider?: "omnivoice" | "supertonic";
       selectedVoice?: string;
       currentProjectId?: string | null;
     };
@@ -23,6 +24,7 @@ export function saveReaderSettings(settings: {
   speed: number;
   volume: number;
   textScale: number;
+  selectedProvider: "omnivoice" | "supertonic";
   selectedVoice: string;
   currentProjectId: string | null;
 }) {

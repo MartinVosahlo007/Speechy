@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { debugSessionLog } from "../application/debugSessionLog";
 import { Copy, ScissorsLineDashed, Sparkles, Trash2 } from "lucide-react";
 import { canStartPlayback } from "../domain/workflow";
 import { useReaderController } from "../application/useReaderController";
+import { AgentChatPanelContainer } from "./AgentChatPanelContainer";
 import { ErrorBanner } from "./ErrorBanner";
 import { PlaybackControls } from "./PlaybackControls";
 import { PlaybackView } from "./PlaybackView";
@@ -12,17 +14,75 @@ import { TextEditor } from "./TextEditor";
 import { VoiceSelector } from "./VoiceSelector";
 
 export function ReaderScreen() {
-  const mounted = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
   const controller = useReaderController();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploadingVoiceTarget, setUploadingVoiceTarget] = useState<"global" | number | null>(null);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const renderCountRef = useRef(0);
+  const lastWorkflowStageRef = useRef(controller.state.workflowStage);
+
+  useEffect(() => {
+    renderCountRef.current += 1;
+  });
+
+  useEffect(() => {
+    const stage = controller.state.workflowStage;
+    if (lastWorkflowStageRef.current === stage) return;
+    debugSessionLog({
+      location: "ReaderScreen.tsx:workflowStage",
+      message: "workflow stage changed",
+      data: {
+        from: lastWorkflowStageRef.current,
+        to: stage,
+        agentOpen,
+        renderCount: renderCountRef.current,
+        projectId: controller.state.currentProjectId,
+        playbackState: controller.state.playbackState,
+      },
+      hypothesisId: "FACT-R1",
+    });
+    lastWorkflowStageRef.current = stage;
+  }, [
+    agentOpen,
+    controller.state.currentProjectId,
+    controller.state.playbackState,
+    controller.state.workflowStage,
+  ]);
+
+  useEffect(() => {
+    if (controller.state.workflowStage !== "playing") return;
+    const interval = window.setInterval(() => {
+      debugSessionLog({
+        location: "ReaderScreen.tsx:playingTick",
+        message: "reader screen render count during playback",
+        data: {
+          renderCount: renderCountRef.current,
+          agentOpen,
+          agentMounted: agentOpen,
+          playbackState: controller.state.playbackState,
+          projectDone: controller.state.progress?.done ?? null,
+          projectTotal: controller.state.progress?.total ?? null,
+        },
+        hypothesisId: "FACT-R2",
+      });
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [
+    agentOpen,
+    controller.state.playbackState,
+    controller.state.progress?.done,
+    controller.state.progress?.total,
+    controller.state.workflowStage,
+  ]);
+
   const isPlaybackVisible = controller.state.workflowStage !== "editing";
   const canPlay = canStartPlayback(controller.state.workflowStage, controller.chunks.length);
   const isWorkflowLocked = controller.state.workflowStage === "playing";
+  const providers = controller.state.health?.providers ?? [];
+  const activeProvider = providers.find((provider) => provider.id === controller.state.selectedProvider);
+  const offlineProvider = providers.find((provider) => !provider.online);
+  const uploadLabel = controller.state.selectedProvider === "supertonic" ? "Importovat JSON hlas" : "Přidat WAV hlas";
 
   if (!mounted) {
     return <div className="min-h-screen w-full bg-white" />;
@@ -75,17 +135,46 @@ export function ReaderScreen() {
             </button>
           </div>
 
-          <VoiceSelector
-            selectedVoice={controller.state.selectedVoice}
-            voices={controller.state.voices}
-            disabled={isWorkflowLocked}
-            uploading={controller.state.uploading && uploadingVoiceTarget === "global"}
-            onVoiceChange={controller.onVoiceChange}
-            onUploadClick={() => {
-              setUploadingVoiceTarget("global");
-              fileRef.current?.click();
-            }}
-          />
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-1 rounded-full border border-black/10 p-1 text-[10px] font-medium uppercase tracking-[0.16em]">
+                {providers.map((provider) => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    title={provider.online ? undefined : provider.error ?? "Engine není dostupný"}
+                    onClick={() => void controller.onProviderChange(provider.id)}
+                    disabled={isWorkflowLocked || !provider.online}
+                    className={`rounded-full px-3 py-1 transition-colors ${
+                      controller.state.selectedProvider === provider.id
+                        ? "bg-black text-white"
+                        : "text-gray-500 hover:text-black"
+                    } disabled:cursor-not-allowed disabled:opacity-40`}
+                  >
+                    {provider.label}
+                  </button>
+                ))}
+              </div>
+              {offlineProvider ? (
+                <p className="max-w-xs text-right text-[10px] normal-case tracking-normal text-amber-700">
+                  {offlineProvider.label} není dostupný: {offlineProvider.error ?? "zkontrolujte backend a restartujte aplikaci"}
+                </p>
+              ) : null}
+            </div>
+
+            <VoiceSelector
+              selectedVoice={controller.state.selectedVoice}
+              voices={controller.state.voices}
+              disabled={isWorkflowLocked || !activeProvider?.online}
+              uploading={controller.state.uploading && uploadingVoiceTarget === "global"}
+              uploadLabel={uploadLabel}
+              onVoiceChange={controller.onVoiceChange}
+              onUploadClick={() => {
+                setUploadingVoiceTarget("global");
+                fileRef.current?.click();
+              }}
+            />
+          </div>
         </div>
 
         <ErrorBanner error={controller.state.error} onDismiss={controller.onDismissError} />
@@ -99,6 +188,7 @@ export function ReaderScreen() {
               voices={controller.state.voices}
               blockVoices={controller.state.blockVoices}
               uploading={controller.state.uploading}
+              uploadLabel={uploadLabel}
               canAssignVoice={controller.state.workflowStage === "assigning"}
               onChunkClick={controller.onChunkClick}
               onBlockVoiceChange={controller.onBlockVoiceChange}
@@ -131,21 +221,34 @@ export function ReaderScreen() {
           onStop={controller.onStop}
         />
 
+        {agentOpen ? (
+          <AgentChatPanelContainer
+            onClose={() => setAgentOpen(false)}
+            onAgentSend={controller.onAgentSend}
+            onAgentApplyScript={controller.onAgentApplyScript}
+          />
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => setAgentOpen(true)}
+          disabled={!controller.state.voices.length || agentOpen}
+          aria-label="Otevřít agenta"
+          title="Agent"
+          className="fixed bottom-6 right-6 z-40 flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition-all hover:border-gray-300 hover:text-black hover:shadow-md disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          <Sparkles className="h-4 w-4" />
+        </button>
+
         <input
           ref={fileRef}
           type="file"
-          accept=".wav,audio/wav"
+          accept={controller.state.selectedProvider === "supertonic" ? ".json,application/json" : ".wav,audio/wav"}
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file && typeof uploadingVoiceTarget === "number") {
-              void controller.onBlockVoiceUpload(uploadingVoiceTarget, file);
-            }
-            if (file && uploadingVoiceTarget === "global") {
-              void (async () => {
-                const uploadedVoice = await controller.onVoiceUpload(file);
-                if (uploadedVoice) controller.onVoiceChange(uploadedVoice);
-              })();
+            if (file && uploadingVoiceTarget !== null) {
+              void controller.onSelectedVoiceUploadTarget(uploadingVoiceTarget, file);
             }
             setUploadingVoiceTarget(null);
             event.target.value = "";

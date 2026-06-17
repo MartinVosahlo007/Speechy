@@ -32,7 +32,7 @@ test("getTtsApiBaseUrl falls back to localhost when env is not set", () => {
   const previous = process.env.NEXT_PUBLIC_TTS_API_BASE_URL;
   delete process.env.NEXT_PUBLIC_TTS_API_BASE_URL;
 
-  assert.equal(getTtsApiBaseUrl(), "http://localhost:8000");
+  assert.equal(getTtsApiBaseUrl(), "http://localhost:18100");
 
   process.env.NEXT_PUBLIC_TTS_API_BASE_URL = previous;
 });
@@ -49,11 +49,12 @@ test("startRender posts the render payload", async () => {
     });
   };
 
-  const result = await startRender({ text: "Ahoj", voice: "speaker.wav" });
+  const result = await startRender({ provider: "omnivoice", text: "Ahoj", voice: "speaker.wav" });
 
   assert.deepEqual(result, { id: "job-1", status: "queued" });
-  assert.equal(request?.url, "http://localhost:8000/api/render");
+  assert.equal(request?.url, "http://localhost:18100/api/render");
   assert.match(request?.body ?? "", /"language":"cs"/);
+  assert.match(request?.body ?? "", /"provider":"omnivoice"/);
 
   global.fetch = originalFetch;
 });
@@ -133,6 +134,7 @@ test("fetchVoices loads available backend voices", async () => {
   global.fetch = async () =>
     new Response(
       JSON.stringify({
+        provider: "omnivoice",
         default_voice: "speaker.wav",
         voices: [
           {
@@ -150,8 +152,9 @@ test("fetchVoices loads available backend voices", async () => {
       },
     );
 
-  const payload = await fetchVoices();
+  const payload = await fetchVoices("omnivoice");
 
+  assert.equal(payload.provider, "omnivoice");
   assert.equal(payload.default_voice, "speaker.wav");
   assert.equal(payload.voices[0]?.name, "speaker.wav");
 
@@ -165,7 +168,7 @@ test("fetchVoices reports backend connection failures", async () => {
     throw new Error("Failed to fetch");
   };
 
-  await assert.rejects(fetchVoices(), /Nepodařilo se spojit s TTS backendem/);
+  await assert.rejects(fetchVoices("omnivoice"), /Nepodařilo se spojit s TTS backendem/);
 
   global.fetch = originalFetch;
 });
@@ -182,6 +185,7 @@ test("syncProject posts the current project state", async () => {
         title: "Ahoj",
         text: "Ahoj",
         language: "cs",
+        selected_provider: "omnivoice",
         selected_voice: "speaker.wav",
         settings: { speed: 1 },
         created_at: 1,
@@ -195,11 +199,12 @@ test("syncProject posts the current project state", async () => {
     );
   };
 
-  const project = await syncProject({ projectId: "project-1", text: "Ahoj", voice: "speaker.wav", speed: 1 });
+  const project = await syncProject({ projectId: "project-1", provider: "omnivoice", text: "Ahoj", voice: "speaker.wav", speed: 1 });
 
   assert.equal(project.id, "project-1");
-  assert.equal(request?.url, "http://localhost:8000/api/projects/sync");
+  assert.equal(request?.url, "http://localhost:18100/api/projects/sync");
   assert.match(request?.body ?? "", /"project_id":"project-1"/);
+  assert.match(request?.body ?? "", /"provider":"omnivoice"/);
 
   global.fetch = originalFetch;
 });
@@ -214,6 +219,7 @@ test("fetchProject returns the persisted project payload", async () => {
         title: "Ahoj",
         text: "Ahoj",
         language: "cs",
+        selected_provider: "omnivoice",
         selected_voice: "speaker.wav",
         settings: { speed: 1 },
         created_at: 1,
@@ -246,6 +252,7 @@ test("startProjectRender triggers project rendering only when needed", async () 
           title: "Ahoj",
           text: "Ahoj",
           language: "cs",
+          selected_provider: "omnivoice",
           selected_voice: "speaker.wav",
           settings: { speed: 1 },
           created_at: 1,
@@ -324,6 +331,7 @@ test("preloadProjectBlockAudio fetches ready blocks and reuses them for playback
     text: "Ahoj",
     language: "cs",
     pinned: false,
+    selected_provider: "omnivoice",
     selected_voice: "speaker.wav",
     settings: { speed: 1 },
     created_at: 1,
@@ -397,9 +405,9 @@ test("project audio cache is scoped to the active project", async () => {
 });
 
 test("getRenderDownloadUrl points to the render download route", () => {
-  assert.equal(getRenderDownloadUrl("job-1"), "http://localhost:8000/api/render/job-1/download");
+  assert.equal(getRenderDownloadUrl("job-1"), "http://localhost:18100/api/render/job-1/download");
 });
 
 test("getProjectDownloadUrl points to the persisted project download route", () => {
-  assert.equal(getProjectDownloadUrl("project-1"), "http://localhost:8000/api/projects/project-1/download");
+  assert.equal(getProjectDownloadUrl("project-1"), "http://localhost:18100/api/projects/project-1/download");
 });

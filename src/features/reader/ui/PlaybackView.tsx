@@ -14,6 +14,7 @@ export function PlaybackView({
   onChunkClick,
   onBlockVoiceChange,
   onBlockVoiceUpload,
+  uploadLabel,
 }: {
   chunks: PlaybackChunk[];
   currentChunkIndex: number;
@@ -25,6 +26,7 @@ export function PlaybackView({
   onChunkClick: (chunk: PlaybackChunk) => void;
   onBlockVoiceChange: (index: number, voice: string) => void;
   onBlockVoiceUpload: (index: number) => void;
+  uploadLabel: string;
 }) {
   const [openMenuIndex, setOpenMenuIndex] = useState<number | null>(null);
 
@@ -81,6 +83,7 @@ export function PlaybackView({
                           setOpenMenuIndex(null);
                         }}
                         onUploadClick={() => onBlockVoiceUpload(chunk.index)}
+                        uploadLabel={uploadLabel}
                         uploading={uploading && openMenuIndex === chunk.index}
                         triggerLabel={formatVoiceLabel(blockVoices[chunk.index] ?? voices[0]?.name)}
                         title="Vybrat hlas bloku"

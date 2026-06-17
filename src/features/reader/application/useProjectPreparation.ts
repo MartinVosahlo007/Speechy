@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import type { PlaybackChunk } from "../domain/chunking";
-import type { ProjectSnapshot } from "../domain/types";
+import type { ProjectSnapshot, TtsProviderId } from "../domain/types";
 import { getWorkflowStageForBlocks } from "../domain/workflow";
 import { syncProject } from "../infrastructure/ttsApi";
 import type { ReaderAction } from "./readerActions";
@@ -10,6 +10,7 @@ type Dispatch = (action: ReaderAction) => void;
 
 export type ProjectPreparationInput = {
   projectId?: string | null;
+  provider: TtsProviderId;
   text: string;
   voice: string;
   speed: number;
@@ -19,6 +20,7 @@ export type ProjectPreparationInput = {
 
 export type ProjectSyncInput = {
   projectId?: string | null;
+  provider: TtsProviderId;
   text: string;
   voice: string;
   blocks: Array<{ text: string; voice: string }>;
@@ -52,6 +54,7 @@ export function buildProjectSyncInput(input: ProjectPreparationInput): ProjectSy
 
   return {
     projectId: preparedInput.projectId,
+    provider: preparedInput.provider,
     text: preparedInput.text,
     voice: preparedInput.voice,
     blocks: preparedInput.blocks.map((chunk, index) => ({

@@ -1,5 +1,5 @@
 import { clampChunkIndex } from "../domain/chunkSelection";
-import type { Health, PlaybackState, ProjectSummary, ReaderProgress, ServerStatus, Voice } from "../domain/types";
+import type { Health, PlaybackState, ProjectSummary, ReaderProgress, ServerStatus, TtsProviderId, Voice } from "../domain/types";
 import type { ReaderWorkflowStage } from "../domain/workflow";
 import type { ReaderAction } from "./readerActions";
 
@@ -13,6 +13,7 @@ export type ReaderState = {
   speed: number;
   volume: number;
   textScale: number;
+  selectedProvider: TtsProviderId;
   selectedVoice: string;
   isBlockMode: boolean;
   blockVoices: string[];
@@ -34,6 +35,7 @@ export const initialReaderState: ReaderState = {
   speed: 1,
   volume: 1,
   textScale: 0.35,
+  selectedProvider: "omnivoice",
   selectedVoice: "speaker.wav",
   isBlockMode: false,
   blockVoices: [],
@@ -46,7 +48,7 @@ export const initialReaderState: ReaderState = {
 };
 
 export function createInitialReaderState(
-  overrides?: Partial<Pick<ReaderState, "text" | "speed" | "volume" | "textScale" | "selectedVoice" | "currentProjectId">>,
+  overrides?: Partial<Pick<ReaderState, "text" | "speed" | "volume" | "textScale" | "selectedProvider" | "selectedVoice" | "currentProjectId">>,
 ): ReaderState {
   return {
     ...initialReaderState,
@@ -66,6 +68,8 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
       return { ...state, volume: action.payload };
     case "textScale/set":
       return { ...state, textScale: action.payload };
+    case "provider/set":
+      return { ...state, selectedProvider: action.payload };
     case "voice/set":
       return { ...state, selectedVoice: action.payload };
     case "blockMode/set":

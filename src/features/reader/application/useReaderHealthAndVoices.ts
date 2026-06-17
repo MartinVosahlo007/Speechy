@@ -1,11 +1,12 @@
 import { useCallback, useEffect } from "react";
 import { fetchHealth, fetchVoices } from "../infrastructure/ttsApi";
+import type { TtsProviderId } from "../domain/types";
 import type { ReaderAction } from "./readerActions";
 import { readerActions } from "./readerActions";
 
 type Dispatch = (action: ReaderAction) => void;
 
-export function useReaderHealthAndVoices(selectedVoice: string, dispatch: Dispatch) {
+export function useReaderHealthAndVoices(selectedProvider: TtsProviderId, selectedVoice: string, dispatch: Dispatch) {
   const refreshHealth = useCallback(async () => {
     try {
       const health = await fetchHealth();
@@ -15,13 +16,17 @@ export function useReaderHealthAndVoices(selectedVoice: string, dispatch: Dispat
     }
   }, []);
 
+  const refreshVoicesForProvider = useCallback(async (provider: TtsProviderId) => {
+    return fetchVoices(provider);
+  }, []);
+
   const refreshVoices = useCallback(async () => {
     try {
-      return await fetchVoices();
+      return await refreshVoicesForProvider(selectedProvider);
     } catch {
       return null;
     }
-  }, []);
+  }, [refreshVoicesForProvider, selectedProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +35,12 @@ export function useReaderHealthAndVoices(selectedVoice: string, dispatch: Dispat
       const result = await refreshHealth();
       if (!cancelled) {
         dispatch(readerActions.setServerStatus(result.status, result.health));
+        if (result.health?.default_provider) {
+          const activeProvider = result.health.providers?.find((provider) => provider.id === selectedProvider);
+          if (!activeProvider?.online) {
+            dispatch(readerActions.setProvider(result.health.default_provider));
+          }
+        }
       }
     };
 
@@ -49,9 +60,10 @@ export function useReaderHealthAndVoices(selectedVoice: string, dispatch: Dispat
       cancelled = true;
       clearInterval(interval);
     };
-  }, [dispatch, refreshHealth, refreshVoices, selectedVoice]);
+  }, [dispatch, refreshHealth, refreshVoices, selectedProvider, selectedVoice]);
 
   return {
+    refreshVoicesForProvider,
     refreshVoices: async () => {
       const payload = await refreshVoices();
       if (!payload) return;

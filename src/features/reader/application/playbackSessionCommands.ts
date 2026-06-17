@@ -10,6 +10,7 @@ import { getProjectPlaybackError, resolveProjectDownloadUrl } from "./projectPla
 import type { ReaderAction } from "./readerActions";
 import { readerActions } from "./readerActions";
 import { applyPlaybackIdleState } from "./playbackTransitions";
+import { debugSessionLog } from "./debugSessionLog";
 
 type Dispatch = (action: ReaderAction) => void;
 
@@ -54,6 +55,27 @@ export function createPlayBlockAudioCallbacks({
       tracePlayback("onEnded", { blockIndex, requestId }, projectRef.current);
 
       const transition = getPlaybackEndTransition(blockIndex, queueLengthRef.current);
+      const nextBlock =
+        transition.type === "advance"
+          ? projectRef.current?.blocks[transition.nextChunkIndex]
+          : undefined;
+      // #region agent log
+      debugSessionLog({
+        location: "playbackSessionCommands.ts:onEnded",
+        message: "block playback ended",
+        data: {
+          endedBlockIndex: blockIndex,
+          endedVoice: project.blocks[blockIndex]?.voice ?? null,
+          transition: transition.type,
+          nextBlockIndex: transition.type === "advance" ? transition.nextChunkIndex : null,
+          nextVoice: nextBlock?.voice ?? null,
+          nextAudioReady: nextBlock?.audio_ready ?? null,
+          projectDone: projectRef.current?.progress.done ?? null,
+          projectTotal: projectRef.current?.progress.total ?? null,
+        },
+        hypothesisId: "FACT-PLAY",
+      });
+      // #endregion
       if (transition.type === "idle") {
         stopPolling();
         applyPlaybackIdleState(dispatch, queueLengthRef.current > 0);
@@ -179,6 +201,7 @@ export function applyOpenedProjectPlaybackState({
 }: OpenPreparedProjectArgs) {
   dispatch(readerActions.setError(project.status === "error" ? getProjectPlaybackError(project) : null));
   dispatch(readerActions.setText(project.text));
+  dispatch(readerActions.setProvider(project.selected_provider));
   dispatch(readerActions.setVoice(project.selected_voice));
   dispatch(readerActions.setSpeed(project.settings.speed ?? speedFallback));
   dispatch(readerActions.selectChunk(0));

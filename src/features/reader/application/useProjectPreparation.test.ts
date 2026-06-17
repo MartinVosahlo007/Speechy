@@ -10,6 +10,7 @@ import {
   resolveProjectBlockVoices,
   resetReaderEditingState,
 } from "./useProjectPreparation";
+import { switchReaderProvider } from "./readerProjectCommands";
 
 const projectBlocks = [
   { index: 0, text: "Prvni blok", start: 0, end: 10 },
@@ -26,6 +27,7 @@ test("resolveProjectBlockVoices resolves missing block voices to the selected vo
 test("buildProjectPreparationInput normalizes block voices before project sync", () => {
   const input = buildProjectPreparationInput({
     projectId: "project-1",
+    provider: "omnivoice",
     text: "Prvni blok\n\nDruhy blok",
     voice: "default.wav",
     speed: 1.15,
@@ -35,6 +37,7 @@ test("buildProjectPreparationInput normalizes block voices before project sync",
 
   assert.deepEqual(input, {
     projectId: "project-1",
+    provider: "omnivoice",
     text: "Prvni blok\n\nDruhy blok",
     voice: "default.wav",
     speed: 1.15,
@@ -46,6 +49,7 @@ test("buildProjectPreparationInput normalizes block voices before project sync",
 test("buildProjectSyncInput resolves missing block voices to the selected voice", () => {
   const input = buildProjectSyncInput({
     projectId: "project-1",
+    provider: "omnivoice",
     text: "Prvni blok\n\nDruhy blok",
     voice: "default.wav",
     speed: 1.15,
@@ -55,6 +59,7 @@ test("buildProjectSyncInput resolves missing block voices to the selected voice"
 
   assert.deepEqual(input, {
     projectId: "project-1",
+    provider: "omnivoice",
     text: "Prvni blok\n\nDruhy blok",
     voice: "default.wav",
     speed: 1.15,
@@ -74,6 +79,7 @@ test("applyProjectToReaderState dispatches current project and progress state", 
     title: "Projekt",
     text: "Text",
     language: "cs",
+    selected_provider: "omnivoice",
     selected_voice: "default.wav",
     settings: { speed: 1 },
     status: "running",
@@ -108,6 +114,7 @@ test("applyOpenedProjectState dispatches block workflow setup for an opened proj
     title: "Projekt",
     text: "Text",
     language: "cs",
+    selected_provider: "omnivoice",
     selected_voice: "default.wav",
     settings: { speed: 1 },
     status: "ready",
@@ -143,5 +150,59 @@ test("resetReaderEditingState clears block workflow state", () => {
     { type: "workflow/stage", payload: "editing" },
     { type: "blockVoices/set", payload: [] },
     { type: "progress/set", payload: null },
+  ]);
+});
+
+test("switchReaderProvider rolls provider back when voices fail to load", async () => {
+  const actions: ReaderAction[] = [];
+
+  await assert.rejects(
+    switchReaderProvider({
+      provider: "supertonic",
+      selectedVoice: "speaker.wav",
+      currentProjectId: "project-1",
+      isBlockMode: false,
+      text: "Text",
+      speed: 1,
+      blocks: [...projectBlocks],
+      dispatch: (action) => actions.push(action),
+      refreshVoicesForProvider: async () => {
+        throw new Error("Provider 'supertonic' is not available.");
+      },
+      prepareProject: async () => null,
+    }),
+    /Provider 'supertonic' is not available\./,
+  );
+
+  assert.deepEqual(actions, [
+    { type: "provider/set", payload: "supertonic" },
+    { type: "provider/set", payload: "omnivoice" },
+  ]);
+});
+
+test("switchReaderProvider picks provider default voice when current voice is unavailable", async () => {
+  const actions: ReaderAction[] = [];
+
+  await switchReaderProvider({
+    provider: "supertonic",
+    selectedVoice: "speaker.wav",
+    currentProjectId: "project-1",
+    isBlockMode: false,
+    text: "Text",
+    speed: 1,
+    blocks: [...projectBlocks],
+    dispatch: (action) => actions.push(action),
+    refreshVoicesForProvider: async () => ({
+      provider: "supertonic",
+      default_voice: "M1",
+      voices: [{ name: "M1" }, { name: "M2" }] as never,
+    }),
+    prepareProject: async () => null,
+  });
+
+  assert.deepEqual(actions, [
+    { type: "provider/set", payload: "supertonic" },
+    { type: "voice/set", payload: "M1" },
+    { type: "blockVoices/set", payload: ["M1", "M1"] },
   ]);
 });

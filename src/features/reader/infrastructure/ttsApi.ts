@@ -1,4 +1,4 @@
-import type { Health, ProjectSnapshot, ProjectSummary, RenderStatus, Voice } from "../domain/types";
+import type { Health, ProjectSnapshot, ProjectSummary, RenderStatus, TtsProviderId, Voice } from "../domain/types";
 import {
   clearProjectBlockAudioCache,
   fetchProjectBlockAudioBlob,
@@ -12,8 +12,8 @@ export async function fetchHealth() {
   });
 }
 
-export async function fetchVoices() {
-  return requestJson<{ default_voice: string; voices: Voice[] }>("/api/voices", "Unable to load voices", {
+export async function fetchVoices(provider: TtsProviderId) {
+  return requestJson<{ provider: TtsProviderId; default_voice: string; voices: Voice[] }>(`/api/voices?provider=${provider}`, "Unable to load voices", {
     cache: "no-store",
   });
 }
@@ -30,11 +30,15 @@ export async function fetchProject(projectId: string) {
   });
 }
 
-export async function createProject(input?: { title?: string }) {
+export async function createProject(input?: { title?: string; provider?: TtsProviderId; voice?: string }) {
   return requestJson<ProjectSnapshot>("/api/projects", "Unable to create project.", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: input?.title ?? null }),
+    body: JSON.stringify({
+      title: input?.title ?? null,
+      provider: input?.provider ?? null,
+      voice: input?.voice ?? null,
+    }),
   });
 }
 
@@ -61,6 +65,7 @@ export async function deleteProject(projectId: string) {
 
 export async function syncProject(input: {
   projectId?: string | null;
+  provider: TtsProviderId;
   text: string;
   voice: string;
   blocks?: Array<{ text: string; voice: string }>;
@@ -73,6 +78,7 @@ export async function syncProject(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       project_id: input.projectId ?? null,
+      provider: input.provider,
       text: input.text,
       voice: input.voice,
       blocks: input.blocks ?? [],
@@ -96,7 +102,20 @@ export async function startProjectRender(projectId: string) {
   });
 }
 
-export async function uploadVoice(file: File) {
+export async function importSupertonicVoiceStyle(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return requestJson<{ voice?: Voice }>("/api/providers/supertonic/styles", "Voice style import failed.", {
+    method: "POST",
+    body: form,
+    errorDetail: true,
+  });
+}
+
+export async function uploadVoice(file: File, provider: TtsProviderId) {
+  if (provider === "supertonic") {
+    return importSupertonicVoiceStyle(file);
+  }
   const form = new FormData();
   form.append("file", file);
   return requestJson<{ voice?: Voice }>("/api/voices", "Voice upload failed.", {
@@ -107,6 +126,7 @@ export async function uploadVoice(file: File) {
 }
 
 export async function startRender(input: {
+  provider: TtsProviderId;
   text: string;
   voice: string;
   language?: string;
@@ -116,6 +136,7 @@ export async function startRender(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      provider: input.provider,
       text: input.text,
       voice: input.voice,
       language: input.language ?? "cs",

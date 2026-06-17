@@ -2,13 +2,18 @@ export type PlaybackState = "idle" | "loading" | "playing" | "paused";
 export type ServerStatus = "checking" | "online" | "offline";
 export type JobStatus = "queued" | "running" | "done" | "error";
 export type RenderBlockJobStatus = "queued" | "running" | "done" | "error";
+export type TtsProviderId = "omnivoice" | "supertonic";
 
 export type Voice = {
   name: string;
-  path: string;
-  size: number;
+  label?: string;
+  provider?: TtsProviderId;
+  kind?: "wav" | "builtin-style" | "custom-style";
+  path?: string;
+  size?: number;
   is_default: boolean;
   has_transcript?: boolean;
+  transcript?: string | null;
 };
 
 export type ProjectSummary = {
@@ -23,6 +28,14 @@ export type ProjectSummary = {
 export type Health = {
   model: string;
   mode?: string;
+  default_provider?: TtsProviderId;
+  providers?: Array<{
+    id: TtsProviderId;
+    label: string;
+    online: boolean;
+    model: string;
+    error?: string;
+  }>;
   defaults?: {
     language?: string;
     speed?: number;
@@ -73,6 +86,7 @@ export type ProjectSnapshot = {
   text: string;
   language: string;
   pinned: boolean;
+  selected_provider: TtsProviderId;
   selected_voice: string;
   settings: {
     speed?: number;
