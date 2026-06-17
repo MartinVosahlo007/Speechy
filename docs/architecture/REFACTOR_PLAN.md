@@ -25,21 +25,37 @@ Meaning:
 
 If code does not clearly fit one of those bullets, stop and name the responsibility before adding it.
 
+## Progress Snapshot (2026-06-08)
+
+Partial refactors already landed. **Before editing, run `npm run check:architecture`** — hotspot limits are defined in `scripts/check-architecture.mjs`, not in this doc.
+
+| Phase | Status | Evidence in repo |
+|---|---|---|
+| 1 — project preparation | **Done** | `useProjectPreparation.ts`; imported by `useLongFormPlaybackSession` |
+| 2 — project polling | **Done** | `useProjectPolling.ts`; imported by `useLongFormPlaybackSession` |
+| 3 — audio session | **Done** | `useAudioPlaybackSession.ts`; imported by `useLongFormPlaybackSession` |
+| 5 — task registry | **Done** | `task_registry.py`; used by `JobService` |
+| 6 — backend render split | **Partial** | `legacy_render_service.py`, `project_render_service.py`, `audio_assembly.py` exist; `job_service.py` is still a wide facade |
+| 8 — slim HTTP | **Partial** | `serializers.py`, `http_models.py`, `dependencies.py`, `provider_helpers.py` extracted; `http.py` still composes routes |
+| 4, 7, 9 | **Open** | Reader hydration dedup; project policy out of `ProjectStore`; enforcement ratchet |
+
+Completed phases are summarized below. Open phases keep the original targets.
+
 ## Evidence Behind This Plan
 
-These are verified repo facts, not guesses:
+Verified repo facts (re-check with source + `npm run check:architecture` before acting):
 
 | Area | Evidence | Why it matters |
-|---|---:|---|
-| `JobService` | Graphify degree 41; source starts at `tts-server/application/job_service.py:19` | It is a god object and cross-community bridge. |
-| `ProjectStore` | Graphify degree 27; source starts at `tts-server/infrastructure/project_store.py:24` | Persistence is coupled to project policy. |
-| `useLongFormPlaybackSession` | 581 LOC; source starts at `src/features/reader/application/useLongFormPlaybackSession.ts:49` | One hook owns several timelines and side effects. |
-| Playback mutable state | refs at lines 56-69 plus `tryPlayDesiredChunkRef` around 161 | Correctness depends on update order across many refs. |
-| `useReaderController` | 293 LOC; source starts at `src/features/reader/application/useReaderController.ts:14` | It exceeds the application target and repeats project setup flows. |
+|---|---|---|
+| `JobService` | Facade delegating to `LegacyRenderService` + `ProjectRenderService`; Graphify degree 41 | Legacy and project render paths still meet here. |
+| `ProjectStore` | Hotspot limit 250 in `check-architecture.mjs`; Graphify degree 27 | Persistence coupled to project policy. |
+| `useLongFormPlaybackSession` | Hotspot limit 420; composes preparation/polling/audio hooks | Playback transition wiring still lives here. |
+| Playback mutable state | refs at lines 56-69 plus `tryPlayDesiredChunkRef` around 161 | Correctness depends on update order across refs. |
+| `useReaderController` | Hotspot limit 230 | Central reader wiring; hydration dedup still open (phase 4). |
 | `ProjectStore.get_project()` | loads, recomputes timeline, saves, then returns | A read operation mutates storage. |
-| `http.py:create_app()` | route factory contains dependency setup, serializers, and many routes | Presentation is doing too much composition. |
+| `http.py` | Hotspot limit 280; uses extracted serializers/models | Presentation composition still dense. |
 
-Graphify is a lead generator, not proof by itself. The bullets above were confirmed with source reads and line counts.
+Graphify is a lead generator, not proof by itself. Confirm every row in source before refactoring.
 
 ## Non-Negotiable Invariants
 
@@ -116,106 +132,52 @@ Exit criteria:
 - Current checks pass or known failures are written down before edits.
 - The first extraction target has a test that can fail if behavior changes.
 
-## Phase 1: Extract Frontend Project Preparation
+## Phase 1: Extract Frontend Project Preparation — DONE
 
-Problem being solved:
+**Landed:** `src/features/reader/application/useProjectPreparation.ts` — project sync/open preparation extracted from the long-form playback hook.
 
-`useLongFormPlaybackSession` currently owns `syncProject`, project opening, refreshes, progress application, and playback control. That makes project preparation inseparable from audio.
+**Remaining (optional):** further shrink `useLongFormPlaybackSession` now that preparation is isolated; add tests if payload edge cases are still uncovered.
 
-Target:
+<details>
+<summary>Original playbook (historical)</summary>
 
-- Create `src/features/reader/application/useProjectPreparation.ts`.
-- Move only project sync/open preparation there:
-  - resolve block voices
-  - call `syncProject`
-  - apply project progress
-  - refresh project list
-  - return a `ProjectSnapshot`
-- Keep audio, object URLs, and polling out of this hook.
+Problem: preparation was inseparable from audio.
 
-Design boundary:
+Target was: dedicated hook for `syncProject`, block voices, progress application, project list refresh — without audio or polling.
 
-- It may import `ttsApi`, `readerActions`, domain types/rules.
-- It must not import `createAudioPlayer`.
-- It should expose small operations, not a second giant controller.
+Exit criteria met: preparation mockable without `createAudioPlayer`; `npm run test:frontend` passes.
 
-Likely first extraction:
+</details>
 
-- Move duplicated `syncProject` payload construction from `onPlay` and `prepareProject`.
-- Keep `useLongFormPlaybackSession` as the caller during the first patch.
+## Phase 2: Extract Frontend Polling — DONE
 
-Exit criteria:
+**Landed:** `src/features/reader/application/useProjectPolling.ts` — polling token lifecycle, render restart, failure handling.
 
-- `useLongFormPlaybackSession` no longer builds project sync payloads in multiple places.
-- Project preparation can be tested/mocked without an audio element.
-- `npm run test:frontend` passes.
+**Remaining (optional):** pure helper tests for polling failure deduplication if not already covered.
 
-## Phase 2: Extract Frontend Polling
+<details>
+<summary>Original playbook (historical)</summary>
 
-Problem being solved:
+Target was: extract `pollProjectUntilReady`, failure normalization, and restart logic out of the long-form hook.
 
-Polling token lifecycle, render restart, readiness checks, and polling failure handling are interleaved with audio playback.
+Exit criteria met: polling reasoned about separately from audio code.
 
-Target:
+</details>
 
-- Create `src/features/reader/application/useProjectPolling.ts`.
-- Own:
-  - polling token increment/cancel
-  - `fetchProject`
-  - `startProjectRender`
-  - restart when a project is ready but incomplete
-  - polling failure normalization/deduplication
-- Accept callbacks:
-  - `onProject(project)`
-  - `tryStartPlayback()`
-  - `onFailure(message)`
+## Phase 3: Extract Frontend Audio Session — DONE
 
-Design boundary:
+**Landed:** `src/features/reader/application/useAudioPlaybackSession.ts` — audio player lifecycle, object URLs, pause/resume/stop.
 
-- It may call `ttsApi`.
-- It must not import `createAudioPlayer`.
-- It must not directly know about object URLs.
+**Remaining:** keep playback *transition* policy in `useLongFormPlaybackSession` shrinking over time; do not move project sync back into the audio hook.
 
-Exit criteria:
+<details>
+<summary>Original playbook (historical)</summary>
 
-- `pollProjectUntilReady`, `handlePollingFailure`, and `startPolling` are no longer in the long-form hook.
-- Polling can be reasoned about without reading audio code.
-- `npm run test:frontend` passes.
+Target was: sole owner of `createAudioPlayer`, object URL revoke, element error mapping.
 
-## Phase 3: Extract Frontend Audio Session
+Exit criteria met: long-form hook composes preparation + polling + audio.
 
-Problem being solved:
-
-Audio object lifecycle, object URLs, active/pending playback refs, and block advancement are mixed with project sync and polling.
-
-Target:
-
-- Create `src/features/reader/application/useAudioPlaybackSession.ts`.
-- Own:
-  - `createAudioPlayer()`
-  - `URL.createObjectURL`
-  - `URL.revokeObjectURL`
-  - current active block
-  - pending load/request id
-  - stop/pause/resume
-  - element error mapping
-- Accept callbacks:
-  - `onEnded(nextIndex)`
-  - `onPlaybackState(state)`
-  - `onError(message)`
-
-Design boundary:
-
-- Only this application hook should call `createAudioPlayer`.
-- Infrastructure still owns the actual `audioPlayer` adapter implementation.
-- The hook should not call project sync.
-
-Exit criteria:
-
-- `useLongFormPlaybackSession` becomes composition of preparation + polling + audio.
-- Object URL cleanup has one owner.
-- Click-during-render/playback behavior is covered manually or by tests.
-- `npm run test:frontend` and `npm run lint` pass.
+</details>
 
 ## Phase 4: Deduplicate Reader Controller Hydration
 
@@ -232,66 +194,46 @@ Target:
 Exit criteria:
 
 - Restore, open, rename-refresh, and create project paths call the same setup path.
-- `useReaderController` drops below the application target or is clearly split into smaller hooks.
+- `useReaderController` stays within hotspot limits and project setup paths stay deduplicated, or the hook is clearly split further.
 - `npm run test:frontend` passes.
 
-## Phase 5: Extract Backend Task Registry
+## Phase 5: Extract Backend Task Registry — DONE
 
-Problem being solved:
+**Landed:** `tts-server/application/task_registry.py` — task maps, cancel/wait/shutdown helpers.
 
-`JobService` owns task maps, cancellation, active counts, waits, shutdown, legacy jobs, and project render jobs.
+**Remaining:** ensure new render code uses the registry instead of ad-hoc task maps; thin `JobService` pass-throughs where safe.
 
-Target:
+<details>
+<summary>Original playbook (historical)</summary>
 
-- Create `tts-server/application/task_registry.py`.
-- Own:
-  - active task maps
-  - create/cancel/wait/shutdown helpers
-  - active count rules
-- Keep it small and boring.
+Target was: task registry with no knowledge of TTS runtimes, project storage, or FastAPI.
 
-Design boundary:
+Exit criteria met: registry exists and is wired from `JobService`.
 
-- It should not know about XTTS, project storage, or FastAPI.
-- It can be tested with simple async tasks.
+</details>
 
-Exit criteria:
+## Phase 6: Split Backend Render Use Cases Behind A Facade — PARTIAL
 
-- `JobService` no longer manually manages every task map operation.
-- Backend tests pass: `npm run test:backend`.
+**Landed:**
 
-## Phase 6: Split Backend Render Use Cases Behind A Facade
+- `legacy_render_service.py` — legacy `/api/render` jobs
+- `project_render_service.py` — project render orchestration
+- `audio_assembly.py` — final audio assembly
+- `job_service.py` — facade preserving public methods for `http.py` and tests
 
-Problem being solved:
+**Remaining:**
 
-`JobService` contains both legacy `/api/render` jobs and project rendering. These are related but not one responsibility.
+- Remove redundant delegate methods from `JobService` as callers move to services directly (only when tests and `http.py` stay stable).
+- Confirm Graphify degree for `JobService` drops after the next split patch.
 
-Target modules:
+<details>
+<summary>Original playbook (historical)</summary>
 
-- `tts-server/application/render_job_service.py`
-  - legacy text render jobs used by `/api/render`
-  - job status, block audio, final audio
-- `tts-server/application/project_render_service.py`
-  - project render orchestration
-  - prompt cache by voice
-  - block render/write/update
-  - project render errors
-- `tts-server/application/audio_assembly.py`
-  - assemble final audio from done project blocks
-- `tts-server/application/job_service.py`
-  - temporary facade preserving current public methods for `http.py` and tests
+Problem: one service owned legacy jobs and project rendering.
 
-Do this in small patches:
+Target modules listed above — most exist; work left is thinning the facade and deleting duplication.
 
-1. Move pure helper methods first: inference option build, audio assembly, block render wrapper if safe.
-2. Move project render path next: `render_project`, `_run_project`, `_assemble_project_audio`.
-3. Move legacy render path last: `create_job`, `_run_job`, `get_job`, render audio getters.
-
-Exit criteria:
-
-- The facade still exposes the same methods used by `http.py`.
-- Existing backend tests pass after each step.
-- Graphify degree for `JobService` should fall after graph rebuild.
+</details>
 
 ## Phase 7: Move Project Policy Out Of ProjectStore
 
@@ -331,26 +273,23 @@ Exit criteria:
 - A plain read does not unexpectedly rewrite project JSON.
 - Backend tests pass.
 
-## Phase 8: Slim HTTP Presentation
+## Phase 8: Slim HTTP Presentation — PARTIAL
 
-Problem being solved:
+**Landed:** `serializers.py`, `http_models.py`, `dependencies.py`, `provider_helpers.py` extracted from the monolithic factory.
 
-`create_app()` currently contains app factory, dependency setup, parsing, serialization, and route handlers.
+**Remaining:**
 
-Target:
+- Move any render workflow decisions still sitting in route handlers into application services.
+- Keep shrinking `create_app()` / route registration in `http.py` (hotspot limit 280).
 
-- Extract serializers into `tts-server/presentation/serializers.py`.
-- Extract dependency construction into a small composition helper if useful.
-- Keep route handlers as:
-  - validate request
-  - call application method
-  - catch known errors
-  - serialize response
+<details>
+<summary>Original playbook (historical)</summary>
 
-Exit criteria:
+Target was: route handlers validate → call application → serialize; factory easy to scan.
 
-- `create_app()` is easier to scan and route handlers do not contain render workflow decisions.
-- `npm run test:backend` passes.
+Partial serializers/dependency split is done; route density remains.
+
+</details>
 
 ## Phase 9: Ratchet Enforcement
 
@@ -391,10 +330,10 @@ Stop and reassess if any of these happen:
 
 ## Minimal Next Step
 
-The safest first runtime refactor is:
+Phases 1–3 and 5 are landed. Safest **next** runtime refactors:
 
-1. Add/adjust tests around project preparation and playback status if needed.
-2. Extract project sync payload construction from `useLongFormPlaybackSession` into a small application helper.
-3. Run `npm run test:frontend`.
+1. **Phase 4** — deduplicate project hydration in `useReaderController` (`applyProjectToReaderState` or equivalent).
+2. **Phase 7** — extract pure timeline/cache helpers from `ProjectStore` with filesystem-free tests.
+3. Run `npm run check:architecture`, `npm run test:frontend`, and `npm run test:backend` after each patch.
 
-This reduces duplication without touching audio lifecycle or backend behavior, so it has the smallest blast radius.
+Do not restart phase 1–3 extractions — those modules already exist.

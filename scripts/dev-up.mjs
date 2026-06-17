@@ -8,10 +8,12 @@ const rootDir = process.cwd();
 const backendDir = path.join(rootDir, "tts-server");
 const nextBin = path.join(rootDir, "node_modules", "next", "dist", "bin", "next");
 const pythonCommand = process.platform === "win32" ? "python" : "python3";
+const defaultBackendPort = Number.parseInt(process.env.SPEECHY_BACKEND_PORT ?? "", 10) || 18100;
+const defaultFrontendPort = Number.parseInt(process.env.SPEECHY_FRONTEND_PORT ?? "", 10) || 3417;
 
 const urls = {
-  backend: "http://localhost:8000",
-  health: "http://localhost:8000/api/health",
+  backend: `http://localhost:${defaultBackendPort}`,
+  health: `http://localhost:${defaultBackendPort}/api/health`,
 };
 
 const children = [];
@@ -156,16 +158,16 @@ function startProcess({ label, command, args, cwd }) {
 
 console.log("Starting local development stack");
 console.log(`Backend URL: ${urls.backend}`);
-console.log("Frontend URL: will be selected automatically starting at http://localhost:3000");
+console.log(`Frontend URL: will be selected automatically starting at http://localhost:${defaultFrontendPort}`);
 console.log(`Health check URL: ${urls.health}`);
 console.log("Processes will stop together if one crashes.");
 
-const backendPortAvailable = await checkPortAvailable(8000);
+const backendPortAvailable = await checkPortAvailable(defaultBackendPort);
 const backendAlreadyRunning = !backendPortAvailable && (await isHealthy(urls.health));
 
 if (!backendPortAvailable && !backendAlreadyRunning) {
-  console.error("Cannot start the backend because port 8000 is already in use by another process.");
-  console.error("Stop the existing service on port 8000 or set up a free backend port before retrying.");
+  console.error(`Cannot start the backend because port ${defaultBackendPort} is already in use by another process.`);
+  console.error(`Stop the existing service on port ${defaultBackendPort} or set SPEECHY_BACKEND_PORT before retrying.`);
   process.exit(1);
 }
 
@@ -177,12 +179,12 @@ if (!backendAlreadyRunning) {
     cwd: backendDir,
   });
 } else {
-  console.log("Reusing the backend already running on port 8000.");
+  console.log(`Reusing the backend already running on port ${defaultBackendPort}.`);
 }
 
-const frontendPort = (await findFreePort(3000)) ?? null;
+const frontendPort = (await findFreePort(defaultFrontendPort)) ?? null;
 if (!frontendPort) {
-  console.error("Cannot find a free frontend port starting from 3000.");
+  console.error(`Cannot find a free frontend port starting from ${defaultFrontendPort}.`);
   process.exit(1);
 }
 

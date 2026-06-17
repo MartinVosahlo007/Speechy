@@ -13,6 +13,8 @@ Its job is simple:
 - avoid workflow overhead on trivial requests
 - reduce hallucinated assumptions and code-smell churn
 
+Human-readable summary: `docs/ai-workflow.md`.
+
 ## Default Stance
 
 Do normal, direct work by default.

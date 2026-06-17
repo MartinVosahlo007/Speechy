@@ -10,6 +10,8 @@ These guidelines adapt the Karpathy-inspired workflow to Codex and to this repos
 
 Use them when implementing features, fixing bugs, reviewing code, or refactoring.
 
+Documentation map: `docs/README.md`. Process policy: `docs/ai-workflow.md`.
+
 ## 1. Think Before Coding
 
 Before making changes:

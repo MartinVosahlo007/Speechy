@@ -11,17 +11,24 @@ let mainWindow = null;
 let shuttingDown = false;
 let shutdownPromise = null;
 let appCanQuitOnWindowClose = false;
+const DEFAULT_BACKEND_PORT = 18100;
+const DEFAULT_FRONTEND_PORT = 3417;
 
 function projectRoot() {
   return app.getAppPath();
 }
 
+function externalAssetRoot() {
+  if (!app.isPackaged) return projectRoot();
+  return path.join(process.resourcesPath, "app.asar.unpacked");
+}
+
 function backendDir() {
-  return path.join(projectRoot(), "tts-server");
+  return path.join(externalAssetRoot(), "tts-server");
 }
 
 function frontendDir() {
-  return path.join(projectRoot(), ".next", "standalone");
+  return path.join(externalAssetRoot(), ".next", "standalone");
 }
 
 function frontendServerPath() {
@@ -48,6 +55,36 @@ function writableServerRoot() {
   const target = path.join(app.getPath("userData"), "tts-server-data");
   fs.mkdirSync(target, { recursive: true });
   return target;
+}
+
+function loadDotEnvIntoProcess() {
+  const envCandidates = [
+    path.join(externalAssetRoot(), ".env"),
+    path.join(projectRoot(), ".env"),
+  ];
+  const envPath = envCandidates.find((candidate) => fs.existsSync(candidate));
+  if (!envPath) {
+    writeMainLog(".env file not found, skipping load");
+    return;
+  }
+  const content = fs.readFileSync(envPath, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!key || key in process.env) continue;
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+  writeMainLog(".env file loaded");
 }
 
 function escapeHtml(value) {
@@ -283,14 +320,20 @@ async function resolveNodeLaunch() {
 async function startDesktopStack() {
   await showLoadingMessage("Spouštím desktop aplikaci", "Připravuji lokální backend a produkční frontend.");
 
-  const backendPort = await findFreePort(8000, 8050);
+  const backendPort = await findFreePort(
+    parseInt(process.env.SPEECHY_BACKEND_PORT ?? "", 10) || DEFAULT_BACKEND_PORT,
+    (parseInt(process.env.SPEECHY_BACKEND_PORT ?? "", 10) || DEFAULT_BACKEND_PORT) + 50,
+  );
   if (!backendPort) {
-    throw new Error("Nenašel jsem volný port pro TTS backend v rozsahu 8000-8050.");
+    throw new Error(`Nenašel jsem volný port pro TTS backend v rozsahu ${parseInt(process.env.SPEECHY_BACKEND_PORT ?? "", 10) || DEFAULT_BACKEND_PORT}-${(parseInt(process.env.SPEECHY_BACKEND_PORT ?? "", 10) || DEFAULT_BACKEND_PORT) + 50}.`);
   }
 
-  const frontendPort = await findFreePort(3000, 3050);
+  const frontendPort = await findFreePort(
+    parseInt(process.env.SPEECHY_FRONTEND_PORT ?? "", 10) || DEFAULT_FRONTEND_PORT,
+    (parseInt(process.env.SPEECHY_FRONTEND_PORT ?? "", 10) || DEFAULT_FRONTEND_PORT) + 50,
+  );
   if (!frontendPort) {
-    throw new Error("Nenašel jsem volný port pro frontend v rozsahu 3000-3050.");
+    throw new Error(`Nenašel jsem volný port pro frontend v rozsahu ${parseInt(process.env.SPEECHY_FRONTEND_PORT ?? "", 10) || DEFAULT_FRONTEND_PORT}-${(parseInt(process.env.SPEECHY_FRONTEND_PORT ?? "", 10) || DEFAULT_FRONTEND_PORT) + 50}.`);
   }
 
   const backendUrl = `http://127.0.0.1:${backendPort}`;
@@ -406,6 +449,7 @@ function shutdownAndQuit(code = 0) {
 async function bootstrap() {
   app.setAppUserModelId("cz.speechy.desktop");
   writeMainLog("bootstrap start");
+  loadDotEnvIntoProcess();
   mainWindow = new BrowserWindow({
     width: 980,
     height: 680,
