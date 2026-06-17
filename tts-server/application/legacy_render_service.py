@@ -1,30 +1,33 @@
 import asyncio
 import contextlib
+import json
 import os
 import uuid
 from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any
 
+from application.runtime_invocation import prepare_runtime_voice, render_runtime_block
 from domain.text_chunking import split_text_into_chunks
 from domain.types import Job
+from application.contracts import InferenceOptions
 
 if TYPE_CHECKING:
     from application.task_registry import TaskRegistry
-    from infrastructure.xtts_runtime import XttsRuntime
+    from application.provider_registry import ProviderRegistry
 
 
 class LegacyRenderService:
     def __init__(
         self,
         *,
-        runtime: "XttsRuntime",
+        runtime_registry: "ProviderRegistry",
         storage_dir: Path,
         task_registry: "TaskRegistry",
         max_active_jobs: int,
         ttl_seconds: int,
     ):
-        self.runtime = runtime
+        self.runtime_registry = runtime_registry
         self.storage_dir = storage_dir
         self.task_registry = task_registry
         self.max_active_jobs = max_active_jobs
@@ -33,17 +36,19 @@ class LegacyRenderService:
 
     def create_job(self, text: str, options: Any) -> str:
         self.cleanup_expired_jobs()
-        blocks = split_text_into_chunks(text, max_chars=self.runtime.long_form_chunk_chars)
+        payload = options.model_dump()
+        runtime = self.runtime_registry.get_runtime(payload.get("provider"))
+        blocks = split_text_into_chunks(text, max_chars=runtime.long_form_chunk_chars)
         if not blocks:
             raise ValueError("Text is empty")
         if self._active_job_count() >= self.max_active_jobs:
             raise ValueError("Too many active render jobs. Please wait for the current jobs to finish.")
 
-        payload = options.model_dump()
         job_id = str(uuid.uuid4())
         self.jobs[job_id] = {
             "id": job_id,
             "status": "queued",
+            "provider": payload.get("provider", getattr(runtime, "provider_id", "omnivoice")),
             "text": text,
             "voice": payload["voice"],
             "language": payload.get("language", "cs"),
@@ -79,15 +84,41 @@ class LegacyRenderService:
         async with self.task_registry.semaphore:
             job["status"] = "running"
             options = self._build_inference_options(payload)
+            runtime = self.runtime_registry.get_runtime(job.get("provider"))
             loop = asyncio.get_event_loop()
             try:
-                prompt = await loop.run_in_executor(
+                prepared_voice = await loop.run_in_executor(
                     None,
-                    self.runtime.create_voice_clone_prompt,
+                    prepare_runtime_voice,
+                    runtime,
                     options.voice,
-                    getattr(options, "preprocess_prompt", True),
+                    options,
                 )
             except Exception as exc:
+                # #region agent log
+                try:
+                    import numpy as _np
+
+                    _debug_payload = {
+                        "sessionId": "aa5a17",
+                        "runId": "post-fix",
+                        "hypothesisId": "H1-numpy-abi",
+                        "location": "legacy_render_service.py:voice_prompt",
+                        "message": "voice prompt creation failed",
+                        "data": {
+                            "error": repr(exc),
+                            "numpy": getattr(_np, "__version__", None),
+                            "pandas": __import__("pandas").__version__,
+                            "sklearn": __import__("sklearn").__version__,
+                        },
+                        "timestamp": int(time() * 1000),
+                    }
+                    _log_path = Path(__file__).resolve().parents[2] / "debug-aa5a17.log"
+                    with _log_path.open("a", encoding="utf-8") as _log_file:
+                        _log_file.write(json.dumps(_debug_payload, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                # #endregion
                 job["status"] = "error"
                 job["error"] = f"Voice prompt creation failed: {repr(exc)}"
                 job["finished_at"] = time()
@@ -99,12 +130,13 @@ class LegacyRenderService:
                 try:
                     waveform, sample_rate = await loop.run_in_executor(
                         None,
-                        self._render_block,
+                        render_runtime_block,
+                        runtime,
                         block["text"],
                         options,
-                        prompt,
+                        prepared_voice,
                     )
-                    audio_path = self._write_block_audio(job_id, block["index"], waveform, sample_rate)
+                    audio_path = self._write_block_audio(job_id, block["index"], waveform, sample_rate, runtime)
                     block["audio_path"] = str(audio_path)
                     block["status"] = "done"
                     start_ms = job["timeline"][-1]["end_ms"] if job["timeline"] else 0
@@ -139,12 +171,12 @@ class LegacyRenderService:
             try:
                 final_waveform, sample_rate, timeline = await loop.run_in_executor(
                     None,
-                    self.runtime.concatenate_rendered_blocks,
+                    runtime.concatenate_rendered_blocks,
                     rendered_blocks,
                 )
                 audio_bytes = await loop.run_in_executor(
                     None,
-                    self.runtime.write_final_wav,
+                    runtime.write_final_wav,
                     final_waveform,
                     sample_rate,
                 )
@@ -167,6 +199,7 @@ class LegacyRenderService:
         return {
             "id": job["id"],
             "status": job["status"],
+            "provider": job["provider"],
             "voice": job["voice"],
             "text": job["text"],
             "total_blocks": job["total_blocks"],
@@ -196,7 +229,8 @@ class LegacyRenderService:
             raise KeyError(job_id)
         if job["status"] != "done" or not job["final_audio_path"]:
             raise ValueError(job["status"])
-        return self.runtime.read_final_wav(Path(job["final_audio_path"]))
+        runtime = self.runtime_registry.get_runtime(job.get("provider"))
+        return runtime.read_final_wav(Path(job["final_audio_path"]))
 
     def get_block_audio(self, job_id: str, block_index: int) -> bytes:
         job = self.jobs.get(job_id)
@@ -208,7 +242,8 @@ class LegacyRenderService:
             raise KeyError(block_index) from exc
         if block["status"] != "done" or not block["audio_path"]:
             raise ValueError(block["status"])
-        return self.runtime.read_final_wav(Path(block["audio_path"]))
+        runtime = self.runtime_registry.get_runtime(job.get("provider"))
+        return runtime.read_final_wav(Path(block["audio_path"]))
 
     async def wait_for_job(self, job_id: str):
         await self.task_registry.wait_for_legacy_job(job_id)
@@ -228,11 +263,11 @@ class LegacyRenderService:
     def _active_job_count(self) -> int:
         return self.task_registry.active_job_count(self.jobs)
 
-    def _write_block_audio(self, job_id: str, block_index: int, waveform, sample_rate: int) -> Path:
+    def _write_block_audio(self, job_id: str, block_index: int, waveform, sample_rate: int, runtime) -> Path:
         job_dir = self.storage_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         target = job_dir / f"block-{block_index}.wav"
-        target.write_bytes(self.runtime.write_final_wav(waveform, sample_rate))
+        target.write_bytes(runtime.write_final_wav(waveform, sample_rate))
         return target
 
     def _write_final_audio(self, job_id: str, audio: bytes) -> Path:
@@ -258,16 +293,4 @@ class LegacyRenderService:
                 job_dir.rmdir()
 
     def _build_inference_options(self, payload: dict[str, Any]):
-        from infrastructure.xtts_runtime import InferenceOptions
-
         return InferenceOptions(**payload)
-
-    def _render_block(self, text: str, options: Any, prompt):
-        return self.runtime.render_single_block(
-            text=text,
-            voice_name=options.voice,
-            language=getattr(options, "language", "cs"),
-            speed=getattr(options, "speed", 1.0),
-            voice_clone_prompt=prompt,
-            options=options,
-        )

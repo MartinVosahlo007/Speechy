@@ -11,9 +11,9 @@ from domain.project_timeline import recompute_project_timeline
 
 
 class ProjectStore:
-    def __init__(self, base_dir: Path, model_identity: str):
+    def __init__(self, base_dir: Path, default_provider: str = "omnivoice"):
         self.base_dir = base_dir
-        self.model_identity = model_identity
+        self.default_provider = default_provider
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.projects_dir = self.base_dir / "projects"
         self.projects_dir.mkdir(parents=True, exist_ok=True)
@@ -24,6 +24,7 @@ class ProjectStore:
         project_id: str | None,
         *,
         text: str,
+        selected_provider: str,
         language: str,
         settings: dict[str, Any],
         blocks: list[dict[str, Any]],
@@ -36,9 +37,9 @@ class ProjectStore:
         next_blocks, block_content_changed = build_synced_project_blocks(
             previous_blocks=previous_blocks,
             blocks=blocks,
+            provider=selected_provider,
             language=language,
             settings=settings,
-            model_identity=self.model_identity,
         )
 
         project = {
@@ -47,6 +48,7 @@ class ProjectStore:
             "text": text,
             "language": language,
             "pinned": previous["pinned"] if previous else False,
+            "selected_provider": selected_provider,
             "selected_voice": selected_voice,
             "settings": settings,
             "created_at": previous["created_at"] if previous else now,
@@ -79,7 +81,7 @@ class ProjectStore:
         if not project: raise KeyError(project_id)
         return project
 
-    def create_project(self, *, title: str | None, selected_voice: str):
+    def create_project(self, *, title: str | None, selected_provider: str, selected_voice: str):
         now = time()
         project_id = str(uuid.uuid4())
         project = {
@@ -88,6 +90,7 @@ class ProjectStore:
             "text": "",
             "language": "cs",
             "pinned": False,
+            "selected_provider": selected_provider,
             "selected_voice": selected_voice,
             "settings": {"speed": 1.0},
             "created_at": now,
@@ -172,14 +175,14 @@ class ProjectStore:
 
     def save_project_block_audio(self, *, project_id: str, block_index: int, voice: str, text: str, audio_bytes: bytes):
         project = self.get_project(project_id)
-        filename = self._build_block_filename(block_index, voice, text)
+        filename = self._build_block_filename(block_index, project["selected_provider"], voice, text)
         target = self._project_dir(project_id) / "blocks" / filename
         target.write_bytes(audio_bytes)
         project["updated_at"] = time()
         self._save_project(project)
         return str(target)
 
-    def _build_block_filename(self, block_index: int, voice: str, text: str): return build_project_block_filename(block_index, voice, text)
+    def _build_block_filename(self, block_index: int, provider: str, voice: str, text: str): return build_project_block_filename(block_index, provider, voice, text)
 
     def _delete_stale_block_files(self, project: dict[str, Any], previous_blocks: list[dict[str, Any]], next_blocks: list[dict[str, Any]]):
         next_audio_paths = {block.get("audio_path") for block in next_blocks if block.get("audio_path")}
@@ -212,7 +215,7 @@ class ProjectStore:
 
     def _read_project_file(self, project_file: Path):
         project = json.loads(project_file.read_text(encoding="utf-8"))
-        return hydrate_loaded_project(project, self.model_identity)
+        return hydrate_loaded_project(project, self.default_provider)
 
     def _save_project(self, project: dict[str, Any]):
         project_file = self._project_file(project["id"])

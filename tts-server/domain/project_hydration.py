@@ -4,8 +4,9 @@ from domain.project_cache_policy import build_project_cache_key
 from domain.project_timeline import recompute_project_timeline
 
 
-def hydrate_loaded_project(project: dict[str, Any], model_identity: str) -> dict[str, Any]:
+def hydrate_loaded_project(project: dict[str, Any], default_provider: str) -> dict[str, Any]:
     project.setdefault("pinned", False)
+    project.setdefault("selected_provider", default_provider)
     project.setdefault("final_audio_path", None)
     project.setdefault("download_ready", False)
     project.setdefault("total_blocks", len(project.get("blocks", [])))
@@ -17,10 +18,10 @@ def hydrate_loaded_project(project: dict[str, Any], model_identity: str) -> dict
             "cache_key",
             build_project_cache_key(
                 text=block["text"],
+                provider=project["selected_provider"],
                 voice=block["voice"],
                 language=project["language"],
                 settings=project["settings"],
-                model_identity=model_identity,
             ),
         )
         block.setdefault("error", None)

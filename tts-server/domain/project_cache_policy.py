@@ -21,16 +21,16 @@ def slugify_project_value(value: str, fallback: str) -> str:
 def build_project_cache_key(
     *,
     text: str,
+    provider: str,
     voice: str,
     language: str,
     settings: dict[str, Any],
-    model_identity: str,
 ):
     payload = {
         "text": normalize_project_text(text),
+        "provider": provider,
         "voice": voice,
         "language": language,
-        "model_identity": model_identity,
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -40,9 +40,10 @@ def build_synced_project_blocks(
     *,
     previous_blocks: list[dict[str, Any]],
     blocks: list[dict[str, Any]],
+    provider: str = "omnivoice",
     language: str,
     settings: dict[str, Any],
-    model_identity: str,
+    model_identity: str | None = None,
 ):
     next_blocks: list[dict[str, Any]] = []
     block_content_changed = False
@@ -50,16 +51,17 @@ def build_synced_project_blocks(
     for index, block in enumerate(blocks):
         cache_key = build_project_cache_key(
             text=block["text"],
+            provider=provider,
             voice=block["voice"],
             language=language,
             settings=settings,
-            model_identity=model_identity,
         )
         previous_block = previous_blocks[index] if index < len(previous_blocks) else None
         reused = (
             previous_block
             and normalize_project_text(previous_block.get("text", "")) == normalize_project_text(block["text"])
             and previous_block.get("voice") == block["voice"]
+            and previous_block.get("cache_key", cache_key) == cache_key
         )
         if not reused:
             block_content_changed = True
@@ -86,7 +88,8 @@ def build_synced_project_blocks(
     return next_blocks, block_content_changed
 
 
-def build_project_block_filename(block_index: int, voice: str, text: str):
+def build_project_block_filename(block_index: int, provider: str, voice: str, text: str):
+    provider_slug = slugify_project_value(provider, "provider")
     voice_slug = slugify_project_value(Path(voice).stem, "voice")
     text_slug = slugify_project_value(normalize_project_text(text)[:48], f"block-{block_index + 1}")
-    return f"{block_index + 1:02d}-{voice_slug}-{text_slug}.wav"
+    return f"{block_index + 1:02d}-{provider_slug}-{voice_slug}-{text_slug}.wav"

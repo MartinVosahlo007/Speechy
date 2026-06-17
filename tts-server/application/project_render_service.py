@@ -1,13 +1,40 @@
 import asyncio
+import json
+import time
 import traceback
 import uuid
 from pathlib import Path
 from typing import Any
 
+from application.contracts import InferenceOptions
+from application.runtime_invocation import prepare_runtime_voice, render_runtime_block
+
+# #region agent log
+_DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / "debug-26eaee.log"
+
+
+def _agent_log(location: str, message: str, data: dict[str, Any], hypothesis_id: str) -> None:
+    try:
+        payload = {
+            "sessionId": "26eaee",
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "timestamp": int(time.time() * 1000),
+        }
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion
+
 
 class ProjectRenderService:
-    def __init__(self, *, runtime, project_store, task_registry, audio_assembler, storage_dir: Path):
-        self.runtime = runtime
+    def __init__(self, *, runtime_registry, project_store, task_registry, audio_assembler, storage_dir: Path):
+        self.runtime_registry = runtime_registry
         self.project_store = project_store
         self.task_registry = task_registry
         self.audio_assembler = audio_assembler
@@ -34,8 +61,9 @@ class ProjectRenderService:
     async def _run_project(self, project_id: str):
         async with self.task_registry.semaphore:
             project = self.project_store.get_project(project_id)
+            runtime = self.runtime_registry.get_runtime(project.get("selected_provider"))
             settings = project["settings"]
-            prompt_cache: dict[str, Any] = {}
+            prepared_voice_cache: dict[str, Any] = {}
             loop = asyncio.get_event_loop()
 
             for block in project["blocks"]:
@@ -43,33 +71,59 @@ class ProjectRenderService:
                     continue
                 current_step = "prompt"
                 try:
-                    if block["voice"] not in prompt_cache:
-                        prompt_cache[block["voice"]] = await loop.run_in_executor(
+                    voice_is_new = block["voice"] not in prepared_voice_cache
+                    # #region agent log
+                    _agent_log(
+                        "project_render_service.py:_run_project",
+                        "block render starting",
+                        {
+                            "projectId": project_id,
+                            "blockIndex": block["index"],
+                            "voice": block["voice"],
+                            "voiceIsNew": voice_is_new,
+                            "provider": project.get("selected_provider"),
+                            "textLength": len(block["text"]),
+                        },
+                        "FACT-B1",
+                    )
+                    # #endregion
+                    if voice_is_new:
+                        prepared_voice_cache[block["voice"]] = await loop.run_in_executor(
                             None,
-                            self.runtime.create_voice_clone_prompt,
+                            prepare_runtime_voice,
+                            runtime,
                             block["voice"],
-                            True,
+                            self._build_inference_options(
+                                {
+                                    "provider": project.get("selected_provider", "omnivoice"),
+                                    "voice": block["voice"],
+                                    "language": project["language"],
+                                    "speed": settings.get("speed", 1.0),
+                                }
+                            ),
                         )
 
                     current_step = "render"
                     waveform, sample_rate = await loop.run_in_executor(
                         None,
-                        self._render_block,
+                        render_runtime_block,
+                        runtime,
                         block["text"],
                         self._build_inference_options(
                             {
+                                "provider": project.get("selected_provider", "omnivoice"),
                                 "voice": block["voice"],
                                 "language": project["language"],
                                 "speed": settings.get("speed", 1.0),
                             }
                         ),
-                        prompt_cache[block["voice"]],
+                        prepared_voice_cache[block["voice"]],
                     )
                     duration_ms = int(round((len(waveform) / sample_rate) * 1000))
                     current_step = "write-wav"
                     audio_bytes = await loop.run_in_executor(
                         None,
-                        self.runtime.write_final_wav,
+                        runtime.write_final_wav,
                         waveform,
                         sample_rate,
                     )
@@ -91,9 +145,39 @@ class ProjectRenderService:
                         sample_rate=sample_rate,
                         error=None,
                     )
+                    # #region agent log
+                    _agent_log(
+                        "project_render_service.py:_run_project",
+                        "block render done",
+                        {
+                            "projectId": project_id,
+                            "blockIndex": block["index"],
+                            "voice": block["voice"],
+                            "durationMs": duration_ms,
+                        },
+                        "FACT-B2",
+                    )
+                    # #endregion
                 except Exception as exc:
                     error_message = f"{current_step}: {repr(exc)}"
                     error_trace = traceback.format_exc()
+                    # #region agent log
+                    _agent_log(
+                        "project_render_service.py:_run_project",
+                        "project block render failed",
+                        {
+                            "provider": project.get("selected_provider"),
+                            "step": current_step,
+                            "blockIndex": block["index"],
+                            "textPreview": block["text"][:120],
+                            "unusualChars": sorted(
+                                {char for char in block["text"] if ord(char) > 127 or char in "„‚«»"}
+                            ),
+                            "error": repr(exc),
+                        },
+                        "B",
+                    )
+                    # #endregion
                     self._log_project_render_error(
                         project_id=project_id,
                         block_index=block["index"],
@@ -114,19 +198,7 @@ class ProjectRenderService:
             self.audio_assembler.assemble_project_audio(project_id)
 
     def _build_inference_options(self, payload: dict[str, Any]):
-        from infrastructure.xtts_runtime import InferenceOptions
-
         return InferenceOptions(**payload)
-
-    def _render_block(self, text: str, options: Any, prompt):
-        return self.runtime.render_single_block(
-            text=text,
-            voice_name=options.voice,
-            language=getattr(options, "language", "cs"),
-            speed=getattr(options, "speed", 1.0),
-            voice_clone_prompt=prompt,
-            options=options,
-        )
 
     def _log_project_render_error(
         self,

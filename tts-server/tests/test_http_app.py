@@ -47,7 +47,6 @@ class FakeJobs:
         self.block_audio_path.write_bytes(b"project-block-audio")
         self.final_audio_path = temp_dir / "final.wav"
         self.final_audio_path.write_bytes(b"project-final-audio")
-        self.project_store = self
         self.synced_project = {
             "id": "project-1",
             "title": "Ahoj svete.",
@@ -153,15 +152,23 @@ class FakeJobs:
     def list_projects(self):
         return [{"id": "project-1", "title": "Ahoj svete.", "preview": "Ahoj svete.", "created_at": 1.0, "updated_at": 2.0}]
 
-    def create_project(self, title=None):
-        self.create_project_title = title
+    def create_project(self, *, title=None, provider=None, voice=None):
+        self.create_project_request = {"title": title, "provider": provider, "voice": voice}
         return {
             **self.created_project,
             "title": title or self.created_project["title"],
+            "selected_provider": provider or self.created_project.get("selected_provider", "omnivoice"),
+            "selected_voice": voice or self.created_project["selected_voice"],
         }
 
-    def sync_project(self, project_id, text, options):
-        self.synced = {"project_id": project_id, "text": text, "options": options.model_dump()}
+    def sync_project(self, project_id, text, options, *, blocks=None, block_voices=None):
+        self.synced = {
+            "project_id": project_id,
+            "text": text,
+            "options": options.model_dump(),
+            "blocks": blocks,
+            "block_voices": block_voices,
+        }
         return self.synced_project
 
     def get_project(self, project_id):
@@ -191,14 +198,16 @@ class FakeJobs:
             raise KeyError(project_id)
         self.deleted_project_id = project_id
 
-    def get_block_audio_path(self, project_id, block_index):
+    def get_project_block_audio_path(self, project_id, block_index):
+        self.project_block_audio_request = {"project_id": project_id, "block_index": block_index}
         if project_id == "project-1" and block_index == 0:
             return str(self.block_audio_path)
         if project_id == "project-1" and block_index == 1:
             raise ValueError("running")
         raise KeyError(block_index)
 
-    def get_final_audio_path(self, project_id):
+    def get_project_final_audio_path(self, project_id):
+        self.project_download_request = {"project_id": project_id}
         if project_id == "project-1":
             return str(self.final_audio_path)
         raise KeyError(project_id)
@@ -291,7 +300,22 @@ class HttpAppTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["id"], "project-created")
         self.assertEqual(payload["title"], "Muj projekt")
-        self.assertEqual(self.jobs.create_project_title, "Muj projekt")
+        self.assertEqual(
+            self.jobs.create_project_request,
+            {"title": "Muj projekt", "provider": None, "voice": None},
+        )
+
+    def test_project_create_passes_provider_and_voice(self):
+        response = self.client.post(
+            "/api/projects",
+            json={"title": "Muj projekt", "provider": "supertonic", "voice": "M2"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.jobs.create_project_request,
+            {"title": "Muj projekt", "provider": "supertonic", "voice": "M2"},
+        )
 
     def test_project_sync_persists_reader_state(self):
         response = self.client.post(
@@ -303,6 +327,25 @@ class HttpAppTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["id"], "project-1")
         self.assertEqual(self.jobs.synced["project_id"], "project-1")
+
+    def test_project_sync_passes_blocks_and_block_voices(self):
+        response = self.client.post(
+            "/api/projects/sync",
+            json={
+                "text": "Ahoj svete.",
+                "voice": "speaker.wav",
+                "project_id": "project-1",
+                "blocks": [{"text": "Ahoj", "voice": "speaker.wav"}],
+                "block_voices": ["speaker.wav"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.jobs.synced["blocks"],
+            [{"text": "Ahoj", "voice": "speaker.wav"}],
+        )
+        self.assertEqual(self.jobs.synced["block_voices"], ["speaker.wav"])
 
     def test_project_sync_rejects_blank_text(self):
         response = self.client.post(
@@ -370,6 +413,10 @@ class HttpAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"project-block-audio")
         self.assertEqual(response.headers["content-type"], "audio/wav")
+        self.assertEqual(
+            self.jobs.project_block_audio_request,
+            {"project_id": "project-1", "block_index": 0},
+        )
 
     def test_project_block_audio_returns_400_for_block_that_is_not_ready(self):
         response = self.client.get("/api/projects/project-1/blocks/1/audio")
@@ -389,6 +436,7 @@ class HttpAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"project-final-audio")
         self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertEqual(self.jobs.project_download_request, {"project_id": "project-1"})
 
     def test_project_download_returns_404_for_missing_project(self):
         response = self.client.get("/api/projects/missing-project/download")

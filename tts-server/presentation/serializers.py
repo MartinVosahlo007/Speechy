@@ -5,6 +5,7 @@ def serialize_project(project: dict):
         "text": project["text"],
         "language": project["language"],
         "pinned": project.get("pinned", False),
+        "selected_provider": project.get("selected_provider", "omnivoice"),
         "selected_voice": project["selected_voice"],
         "settings": project["settings"],
         "created_at": project["created_at"],

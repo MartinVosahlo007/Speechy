@@ -52,13 +52,15 @@ class VoiceStore:
         content = transcript_path.read_text(encoding="utf-8").strip()
         return content or None
 
-    def serialize(self, path: Path) -> dict[str, str | int | bool]:
+    def serialize(self, path: Path) -> dict[str, str | int | bool | None]:
+        transcript = self.load_transcript(path)
         return {
             "name": path.name,
             "path": str(path),
             "size": path.stat().st_size,
             "is_default": path.name == self.default_voice_name,
-            "has_transcript": self.load_transcript(path) is not None,
+            "has_transcript": transcript is not None,
+            "transcript": transcript,
         }
 
     def save_upload(self, filename: str, content: bytes) -> Path:

@@ -5,43 +5,62 @@ from typing import TYPE_CHECKING, Any
 from application.legacy_render_service import LegacyRenderService
 from application.audio_assembly import ProjectAudioAssembler
 from application.project_render_service import ProjectRenderService
+from application.provider_registry import ProviderRegistry
 from application.task_registry import TaskRegistry
 from domain.text_chunking import split_text_into_chunks
 from infrastructure.project_store import ProjectStore
 
 if TYPE_CHECKING:
-    from infrastructure.xtts_runtime import XttsRuntime
+    from application.contracts import InferenceOptions
 
 
 class JobService:
     def __init__(
         self,
-        runtime: "XttsRuntime",
+        runtime_registry: ProviderRegistry | None = None,
+        runtime: Any | None = None,
         storage_dir: Path | None = None,
         max_active_jobs: int = 2,
         ttl_seconds: int = 900,
     ):
-        self.runtime = runtime
+        if runtime_registry is None:
+            if runtime is None:
+                raise ValueError("Either runtime_registry or runtime must be provided.")
+            runtime_provider_id = getattr(runtime, "provider_id", "omnivoice")
+            runtime_label = getattr(runtime, "provider_label", runtime_provider_id.title())
+            runtime_registry = ProviderRegistry(
+                runtimes={runtime_provider_id: runtime},
+                statuses=[
+                    {
+                        "id": runtime_provider_id,
+                        "label": runtime_label,
+                        "online": True,
+                        "model": getattr(runtime, "model_name", "runtime"),
+                    }
+                ],
+                default_provider_id=runtime_provider_id,
+            )
+
+        self.runtime_registry = runtime_registry
+        self.default_provider_id = runtime_registry.default_provider_id
+        self.runtime = runtime or runtime_registry.default_runtime()
         self.max_active_jobs = max_active_jobs
         self.ttl_seconds = ttl_seconds
         self.storage_dir = storage_dir or Path(tempfile.gettempdir()) / "omnivoice-jobs"
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.task_registry = TaskRegistry(max_active_jobs)
         self.legacy_render_service = LegacyRenderService(
-            runtime=self.runtime,
+            runtime_registry=self.runtime_registry,
             storage_dir=self.storage_dir,
             task_registry=self.task_registry,
             max_active_jobs=max_active_jobs,
             ttl_seconds=ttl_seconds,
         )
         self.jobs = self.legacy_render_service.jobs
-        self.project_store = ProjectStore(
-            self.storage_dir,
-            getattr(runtime, "model_name", "runtime"),
-        )
-        self.project_audio_assembler = ProjectAudioAssembler(self.project_store, self.runtime)
+        self.project_store = ProjectStore(self.storage_dir, default_provider=self.default_provider_id)
+        self.project_audio_assembler = ProjectAudioAssembler(self.project_store, self.runtime_registry)
         self.project_render_service = ProjectRenderService(
-            runtime=self.runtime,
+            runtime_registry=self.runtime_registry,
             project_store=self.project_store,
             task_registry=self.task_registry,
             audio_assembler=self.project_audio_assembler,
@@ -62,6 +81,12 @@ class JobService:
 
     def get_block_audio(self, job_id: str, block_index: int) -> bytes:
         return self.legacy_render_service.get_block_audio(job_id, block_index)
+
+    def get_project_block_audio_path(self, project_id: str, block_index: int) -> str:
+        return self.project_store.get_block_audio_path(project_id, block_index)
+
+    def get_project_final_audio_path(self, project_id: str) -> str:
+        return self.project_store.get_final_audio_path(project_id)
 
     async def wait_for_job(self, job_id: str):
         await self.legacy_render_service.wait_for_job(job_id)
@@ -88,9 +113,6 @@ class JobService:
     def _build_inference_options(self, payload: dict[str, Any]):
         return self.legacy_render_service._build_inference_options(payload)
 
-    def _render_block(self, text: str, options: Any, prompt):
-        return self.legacy_render_service._render_block(text, options, prompt)
-
     def sync_project(
         self,
         project_id: str | None,
@@ -100,17 +122,19 @@ class JobService:
         blocks: list[dict[str, str]] | None = None,
         block_voices: list[str] | None = None,
     ):
+        payload = options.model_dump()
+        runtime = self.runtime_registry.get_runtime(payload.get("provider"))
         resolved_blocks = blocks or [
             {"text": block_text}
-            for block_text in split_text_into_chunks(text, max_chars=self.runtime.long_form_chunk_chars)
+            for block_text in split_text_into_chunks(text, max_chars=runtime.long_form_chunk_chars)
         ]
         if not resolved_blocks:
             raise ValueError("Text is empty")
-        payload = options.model_dump()
         assigned_voices = block_voices or []
         return self.project_store.sync_project(
             project_id,
             text=text,
+            selected_provider=payload.get("provider", self._runtime_provider_id(runtime)),
             language=payload.get("language", "cs"),
             settings={"speed": payload.get("speed", 1.0)},
             selected_voice=payload["voice"],
@@ -126,10 +150,12 @@ class JobService:
     def list_projects(self):
         return self.project_store.list_projects()
 
-    def create_project(self, *, title: str | None = None):
+    def create_project(self, *, title: str | None = None, provider: str | None = None, voice: str | None = None):
+        runtime = self.runtime_registry.get_runtime(provider or self.default_provider_id)
         project = self.project_store.create_project(
             title=title,
-            selected_voice=self.runtime.voice_store.default_voice_name,
+            selected_provider=self._runtime_provider_id(runtime),
+            selected_voice=voice or self._runtime_default_voice(runtime),
         )
         return self.get_project(project["id"])
 
@@ -186,3 +212,11 @@ class JobService:
             step=step,
             error_trace=error_trace,
         )
+
+    def _runtime_default_voice(self, runtime):
+        if hasattr(runtime, "default_voice_name"):
+            return runtime.default_voice_name()
+        return runtime.voice_store.default_voice_name
+
+    def _runtime_provider_id(self, runtime):
+        return getattr(runtime, "provider_id", self.default_provider_id)

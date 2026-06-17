@@ -7,6 +7,7 @@ from types import SimpleNamespace
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from application.job_service import JobService
+from application.runtime_invocation import prepare_runtime_voice, render_runtime_block
 
 
 class FakeRuntime:
@@ -68,6 +69,69 @@ class FakeRuntime:
 class PromptFailureRuntime(FakeRuntime):
     def create_voice_clone_prompt(self, voice_name: str, preprocess_prompt: bool = True):
         raise ImportError("missing runtime dependency")
+
+
+class PreparedVoiceRuntime(FakeRuntime):
+    def __init__(self):
+        super().__init__()
+        self.prepared_voice_calls: list[dict[str, object]] = []
+        self.prepare_voice_calls: list[dict[str, object]] = []
+
+    def prepare_voice(self, voice_name: str, options=None):
+        self.prepare_voice_calls.append({"voice_name": voice_name, "options": options})
+        return {"prepared_voice": voice_name}
+
+    def render_single_block(
+        self,
+        text: str,
+        voice_name: str,
+        language: str = "cs",
+        speed: float = 1.0,
+        prepared_voice=None,
+        options=None,
+    ):
+        self.prepared_voice_calls.append({"prepared_voice": prepared_voice, "options": options})
+        return super().render_single_block(text, voice_name, language, speed, options=options)
+
+
+class LegacyVoiceCloneRuntime(FakeRuntime):
+    def __init__(self):
+        super().__init__()
+        self.voice_clone_prompt_calls: list[dict[str, object]] = []
+
+    def render_single_block(
+        self,
+        text: str,
+        voice_name: str,
+        language: str = "cs",
+        speed: float = 1.0,
+        voice_clone_prompt=None,
+        options=None,
+    ):
+        self.voice_clone_prompt_calls.append(
+            {"voice_clone_prompt": voice_clone_prompt, "options": options}
+        )
+        return super().render_single_block(
+            text,
+            voice_name,
+            language,
+            speed,
+            voice_clone_prompt=voice_clone_prompt,
+            options=options,
+        )
+
+
+class RenderTypeErrorRuntime(PreparedVoiceRuntime):
+    def render_single_block(
+        self,
+        text: str,
+        voice_name: str,
+        language: str = "cs",
+        speed: float = 1.0,
+        prepared_voice=None,
+        options=None,
+    ):
+        raise TypeError("boom from runtime")
 
 
 class JobServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -329,3 +393,60 @@ class JobServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(orphan_dir.exists())
             self.assertTrue(valid_dir.exists())
             self.assertEqual(service.get_project("valid-project")["id"], "valid-project")
+
+    def test_runtime_invocation_uses_prepared_voice_when_supported(self):
+        runtime = PreparedVoiceRuntime()
+        options = SimpleNamespace(voice="speaker.wav", language="cs", speed=1.0)
+
+        waveform, sample_rate = render_runtime_block(runtime, "Ahoj", options, {"prepared": True})
+
+        self.assertEqual(sample_rate, 10)
+        self.assertTrue(waveform)
+        self.assertEqual(runtime.prepared_voice_calls[0]["prepared_voice"], {"prepared": True})
+
+    def test_runtime_invocation_uses_voice_clone_prompt_for_legacy_signature(self):
+        runtime = LegacyVoiceCloneRuntime()
+        options = SimpleNamespace(voice="speaker.wav", language="cs", speed=1.0)
+
+        waveform, sample_rate = render_runtime_block(runtime, "Ahoj", options, {"legacy": True})
+
+        self.assertEqual(sample_rate, 10)
+        self.assertTrue(waveform)
+        self.assertEqual(
+            runtime.voice_clone_prompt_calls[0]["voice_clone_prompt"],
+            {"legacy": True},
+        )
+
+    def test_runtime_invocation_does_not_swallow_runtime_type_error(self):
+        runtime = RenderTypeErrorRuntime()
+        options = SimpleNamespace(voice="speaker.wav", language="cs", speed=1.0)
+
+        with self.assertRaisesRegex(TypeError, "boom from runtime"):
+            render_runtime_block(runtime, "Ahoj", options, {"prepared": True})
+
+    def test_prepare_runtime_voice_prefers_prepare_voice_when_available(self):
+        runtime = PreparedVoiceRuntime()
+        options = SimpleNamespace(voice="speaker.wav", preprocess_prompt=False)
+
+        prepared = prepare_runtime_voice(runtime, "speaker.wav", options)
+
+        self.assertEqual(prepared, {"prepared_voice": "speaker.wav"})
+        self.assertEqual(
+            runtime.prepare_voice_calls,
+            [{"voice_name": "speaker.wav", "options": options}],
+        )
+
+    async def test_job_service_exposes_project_audio_paths_via_public_methods(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self.make_service(temp_dir, max_active_jobs=2, ttl_seconds=60)
+
+            project = service.sync_project(None, "Prvni veta. Druha veta.", self.make_options())
+            render_job_id = service.render_project(project["id"])
+            self.assertIsNotNone(render_job_id)
+            await service.wait_for_project(project["id"])
+
+            block_path = Path(service.get_project_block_audio_path(project["id"], 0))
+            final_path = Path(service.get_project_final_audio_path(project["id"]))
+
+            self.assertTrue(block_path.exists())
+            self.assertTrue(final_path.exists())
