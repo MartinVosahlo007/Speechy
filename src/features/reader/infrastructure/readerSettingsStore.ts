@@ -1,6 +1,7 @@
 const KEY = "ttsCzechState";
 
 export function loadReaderSettings() {
+  if (typeof window === "undefined") return null;
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
@@ -9,7 +10,9 @@ export function loadReaderSettings() {
       speed?: number;
       volume?: number;
       textScale?: number;
+      selectedProvider?: "omnivoice" | "supertonic";
       selectedVoice?: string;
+      currentProjectId?: string | null;
     };
   } catch {
     return null;
@@ -21,7 +24,10 @@ export function saveReaderSettings(settings: {
   speed: number;
   volume: number;
   textScale: number;
+  selectedProvider: "omnivoice" | "supertonic";
   selectedVoice: string;
+  currentProjectId: string | null;
 }) {
+  if (typeof window === "undefined") return;
   localStorage.setItem(KEY, JSON.stringify(settings));
 }

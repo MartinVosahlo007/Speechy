@@ -32,10 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
-
 
 # typescript
 *.tsbuildinfo
@@ -44,26 +44,58 @@ local-*
 .claude
 .z-ai-config
 *.log
+*.stderr.log
+*.stdout.log
+*.err
+*.out
 dev.log
+dev-up.err
+dev-up.out
 dev.out.log
 test
 prompt
 
 server.log
+desktop-dist/
+desktop-logs/
+
+# Python
+**/__pycache__/
+*.py[cod]
+
 # Skills directory
 /skills/
 OmniVoice
 /OmniVoice
-tts-server/__pycache__/
-/tts-server/__pycache__/
+
+# TTS runtime data (local only)
 tts-server/tmp-jobs
 /tts-server/tmp-jobs
+tts-server/tmp-jobs-debug/
 tts-server/voices
 /tts-server/voices
-/tts-server/__pycache__
-/tts-server/tests/__pycache__
+tts-server/.model-cache/
 
-tts-server/application/__pycache__
-tts-server/domain/__pycache__
-tts-server/infrastructure/__pycache__
-tts-server/presentation/__pycache__
+# IDE / tooling
+.playwright-mcp/
+.kilo/
+.windsurf/
+.planner-reviewer/
+.fallow/
+architecture-report.md
+.vscode/
+.cursor/*.log
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/karpathy-guidelines/
+!.codex/skills/karpathy-guidelines/**
+!.codex/skills/pragmatic-superpowers/
+!.codex/skills/pragmatic-superpowers/**
+.planning/
+.agents/
+
+# Graphify generated output
+graphify-out/*
+!graphify-out/
+!graphify-out/GRAPH_REPORT.md

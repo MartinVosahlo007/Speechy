@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import uuid
 
@@ -5,15 +6,26 @@ import uuid
 class VoiceStore:
     def __init__(self, base_dir: Path, default_voice_name: str):
         self.base_dir = base_dir
-        self.voices_dir = base_dir / "voices"
+        self.bundled_voices_dir = base_dir / "voices"
+        configured_voices_dir = os.environ.get("TTS_SERVER_VOICES_DIR", "").strip()
+        self.voices_dir = Path(configured_voices_dir) if configured_voices_dir else self.bundled_voices_dir
         self.legacy_voices = [base_dir / "speaker.wav", base_dir / "speaker2.wav"]
         self.default_voice_name = default_voice_name
-        self.voices_dir.mkdir(exist_ok=True)
+        self.voices_dir.mkdir(parents=True, exist_ok=True)
 
     def list_voice_paths(self) -> list[Path]:
         voices = []
         seen: set[str] = set()
-        wav_files = [f for f in self.voices_dir.iterdir() if f.is_file() and f.suffix.lower() == ".wav"]
+        candidate_dirs = [self.voices_dir]
+        if self.bundled_voices_dir != self.voices_dir:
+            candidate_dirs.append(self.bundled_voices_dir)
+        wav_files: list[Path] = []
+        for voice_dir in candidate_dirs:
+            if not voice_dir.exists() or not voice_dir.is_dir():
+                continue
+            wav_files.extend(
+                f for f in voice_dir.iterdir() if f.is_file() and f.suffix.lower() == ".wav"
+            )
         for candidate in [*sorted(wav_files), *self.legacy_voices]:
             if candidate.exists() and candidate.is_file():
                 key = str(candidate.resolve()).lower()
@@ -40,13 +52,15 @@ class VoiceStore:
         content = transcript_path.read_text(encoding="utf-8").strip()
         return content or None
 
-    def serialize(self, path: Path) -> dict[str, str | int | bool]:
+    def serialize(self, path: Path) -> dict[str, str | int | bool | None]:
+        transcript = self.load_transcript(path)
         return {
             "name": path.name,
             "path": str(path),
             "size": path.stat().st_size,
             "is_default": path.name == self.default_voice_name,
-            "has_transcript": self.load_transcript(path) is not None,
+            "has_transcript": transcript is not None,
+            "transcript": transcript,
         }
 
     def save_upload(self, filename: str, content: bytes) -> Path:

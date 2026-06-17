@@ -1,17 +1,41 @@
 export type PlaybackState = "idle" | "loading" | "playing" | "paused";
 export type ServerStatus = "checking" | "online" | "offline";
 export type JobStatus = "queued" | "running" | "done" | "error";
+export type RenderBlockJobStatus = "queued" | "running" | "done" | "error";
+export type TtsProviderId = "omnivoice" | "supertonic";
 
 export type Voice = {
   name: string;
-  path: string;
-  size: number;
+  label?: string;
+  provider?: TtsProviderId;
+  kind?: "wav" | "builtin-style" | "custom-style";
+  path?: string;
+  size?: number;
   is_default: boolean;
+  has_transcript?: boolean;
+  transcript?: string | null;
+};
+
+export type ProjectSummary = {
+  id: string;
+  title: string;
+  preview: string;
+  pinned: boolean;
+  created_at: number;
+  updated_at: number;
 };
 
 export type Health = {
   model: string;
   mode?: string;
+  default_provider?: TtsProviderId;
+  providers?: Array<{
+    id: TtsProviderId;
+    label: string;
+    online: boolean;
+    model: string;
+    error?: string;
+  }>;
   defaults?: {
     language?: string;
     speed?: number;
@@ -25,6 +49,21 @@ export type TimelineBlock = {
   end_ms: number;
 };
 
+export type RenderBlockStatus = {
+  index: number;
+  text: string;
+  status: RenderBlockJobStatus;
+  audio_ready: boolean;
+  start_ms: number | null;
+  end_ms: number | null;
+  error?: string | null;
+};
+
+export type ProjectBlockStatus = RenderBlockStatus & {
+  voice: string;
+  cache_key: string;
+};
+
 export type RenderStatus = {
   id: string;
   status: JobStatus;
@@ -35,7 +74,32 @@ export type RenderStatus = {
   audio_ready: boolean;
   download_ready: boolean;
   timeline: TimelineBlock[];
+  blocks: RenderBlockStatus[];
   error?: string | null;
+};
+
+export type ProjectStatus = "ready" | "running" | "error";
+
+export type ProjectSnapshot = {
+  id: string;
+  title: string;
+  text: string;
+  language: string;
+  pinned: boolean;
+  selected_provider: TtsProviderId;
+  selected_voice: string;
+  settings: {
+    speed?: number;
+  };
+  created_at: number;
+  updated_at: number;
+  download_ready: boolean;
+  status: ProjectStatus;
+  progress: {
+    done: number;
+    total: number;
+  };
+  blocks: ProjectBlockStatus[];
 };
 
 export type ReaderProgress = {

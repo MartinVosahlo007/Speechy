@@ -1,0 +1,18 @@
+---
+description: Speechy — vrstvy, dokumentace, workflow pro AI
+alwaysApply: true
+---
+
+# Speechy
+
+Před větší změnou přečti [docs/README.md](mdc:docs/README.md) a [AGENTS.md](mdc:AGENTS.md).
+
+- Vrstvy a limity: [docs/constitution.md](mdc:docs/constitution.md), [docs/architecture.md](mdc:docs/architecture.md)
+- Workflow a skills: [docs/ai-workflow.md](mdc:docs/ai-workflow.md)
+- Refactor hotspotů: [docs/architecture/REFACTOR_PLAN.md](mdc:docs/architecture/REFACTOR_PLAN.md)
+
+Reader: `src/features/reader/{domain,application,infrastructure,ui}`. Backend: `tts-server/{presentation,application,domain,infrastructure}`.
+
+Ověření: `npm run test:frontend`, `npm run test:backend`, `npm run lint` — podle rozsahu změny. Chráněné soubory (constitution, architecture, governance, AGENTS) měň jen s záznamem v `.governance/GOVERNANCE_CHANGE.md`.
+
+Uživatel není programátor — vysvětlení jednoduše, bez zbytečných refaktorů.

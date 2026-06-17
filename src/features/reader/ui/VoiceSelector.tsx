@@ -1,10 +1,14 @@
+import { useState } from "react";
+import { Upload } from "lucide-react";
 import type { Voice } from "../domain/types";
+import { VoiceMenu } from "./VoiceMenu";
 
 export function VoiceSelector({
   selectedVoice,
   voices,
   disabled,
   uploading,
+  uploadLabel,
   onVoiceChange,
   onUploadClick,
 }: {
@@ -12,24 +16,33 @@ export function VoiceSelector({
   voices: Voice[];
   disabled: boolean;
   uploading: boolean;
+  uploadLabel: string;
   onVoiceChange: (value: string) => void;
   onUploadClick: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="space-y-3">
-      <div className="text-[10px] font-medium uppercase tracking-[0.2em] text-gray-400">
-        <label>Hlas</label>
-      </div>
-      <select value={selectedVoice} onChange={(event) => onVoiceChange(event.target.value)} disabled={disabled} className="w-full border border-gray-300 bg-white px-3 py-3 text-sm">
-        {voices.map((voice) => (
-          <option key={voice.name} value={voice.name}>
-            {voice.name}
-          </option>
-        ))}
-      </select>
-      <button type="button" onClick={onUploadClick} disabled={disabled || uploading} className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-gray-500 hover:text-black disabled:opacity-40">
-        <span>{uploading ? "…" : "+"}</span>
-        Přidat hlas
+    <div className="relative flex items-center gap-2">
+      <VoiceMenu
+        selectedVoice={selectedVoice}
+        voices={voices}
+        disabled={disabled}
+        onVoiceChange={onVoiceChange}
+        uploadLabel={uploadLabel}
+        open={open}
+        onOpenChange={setOpen}
+        title="Vybrat hlas"
+      />
+
+      <button
+        type="button"
+        onClick={onUploadClick}
+        disabled={disabled || uploading}
+        className="frameless-action frameless-focus"
+      >
+        <Upload className="h-3 w-3" />
+        <span>{uploading ? "Nahrávám" : uploadLabel}</span>
       </button>
     </div>
   );

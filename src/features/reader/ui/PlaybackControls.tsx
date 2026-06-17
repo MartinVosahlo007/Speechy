@@ -1,83 +1,84 @@
-import type { PlaybackState, ReaderProgress } from "../domain/types";
+import { LoaderCircle } from "lucide-react";
+import type { PlaybackState } from "../domain/types";
+import type { ReaderWorkflowStage } from "../domain/workflow";
 
 export function PlaybackControls({
   playbackState,
-  progress,
-  disabled,
+  workflowStage,
+  statusLabel,
   downloadUrl,
+  canPlay,
   onPlay,
   onPause,
   onResume,
   onStop,
 }: {
   playbackState: PlaybackState;
-  progress: ReaderProgress | null;
-  disabled: boolean;
+  workflowStage: ReaderWorkflowStage;
+  statusLabel?: string | null;
   downloadUrl: string | null;
+  canPlay: boolean;
   onPlay: () => void;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
 }) {
   return (
-    <div className="space-y-3 pt-12">
-      {playbackState === "idle" && (
-        <button
-          onClick={onPlay}
-          disabled={disabled}
-          className="flex w-full items-center justify-between border border-black bg-black px-6 py-5 text-white transition-colors duration-300 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <span className="text-xs font-medium uppercase tracking-[0.2em]">Přehrát</span>
+    <div className="mt-6 flex flex-wrap items-center gap-4 pt-2 text-[10px] font-medium uppercase tracking-[0.2em] text-gray-400">
+      {workflowStage === "assigning" && playbackState === "idle" ? (
+        <button onClick={onPlay} disabled={!canPlay} className="frameless-action frameless-action--strong frameless-focus">
           <span>▶</span>
+          <span>Přehrát</span>
         </button>
-      )}
-      {playbackState === "loading" && (
-        <button
-          disabled
-          className="flex w-full items-center justify-between border border-gray-300 bg-gray-100 px-6 py-5 text-gray-500"
-        >
-          <span className="text-xs font-medium uppercase tracking-[0.2em]">
-            {progress ? `Generuji audio ${progress.done}/${progress.total}` : "Generuji audio"}
-          </span>
+      ) : null}
+      {playbackState === "loading" ? (
+        <button disabled className="frameless-action frameless-action--strong frameless-focus animate-pulse">
           <span>…</span>
+          <span>{statusLabel ?? "Připravuji přehrávání"}</span>
         </button>
-      )}
-      {playbackState === "playing" && (
+      ) : null}
+      {playbackState !== "loading" && statusLabel ? (
+        <div className="inline-flex items-center gap-2 text-gray-400">
+          <LoaderCircle className="h-3 w-3 animate-spin" />
+          <span>{statusLabel}</span>
+        </div>
+      ) : null}
+      {playbackState === "playing" ? (
         <button
           onClick={onPause}
-          className="flex w-full items-center justify-between border border-black bg-white px-6 py-5 text-black"
+          className="frameless-action frameless-action--strong frameless-focus"
         >
-          <span className="text-xs font-medium uppercase tracking-[0.2em]">Pozastavit</span>
           <span>❚❚</span>
+          <span>Pozastavit</span>
         </button>
-      )}
-      {playbackState === "paused" && (
+      ) : null}
+      {playbackState === "paused" ? (
         <button
           onClick={onResume}
-          className="flex w-full items-center justify-between border border-black bg-black px-6 py-5 text-white"
+          className="frameless-action frameless-action--strong frameless-focus"
         >
-          <span className="text-xs font-medium uppercase tracking-[0.2em]">Pokračovat</span>
           <span>▶</span>
+          <span>Pokračovat</span>
         </button>
-      )}
-      {playbackState !== "idle" && (
+      ) : null}
+      {playbackState !== "idle" ? (
         <button
           onClick={onStop}
-          className="flex w-full items-center justify-between border border-gray-300 bg-transparent px-6 py-4 text-gray-500"
+          className="frameless-action frameless-focus"
         >
-          <span className="text-[10px] font-medium uppercase tracking-[0.2em]">Zastavit</span>
           <span>■</span>
+          <span>Zastavit</span>
         </button>
-      )}
-      {downloadUrl && playbackState !== "loading" && (
+      ) : null}
+      {downloadUrl && playbackState !== "loading" ? (
         <a
           href={downloadUrl}
-          className="flex w-full items-center justify-between border border-gray-300 bg-white px-6 py-4 text-black"
+          className="frameless-action frameless-focus"
         >
-          <span className="text-[10px] font-medium uppercase tracking-[0.2em]">Stáhnout WAV</span>
           <span>↓</span>
+          <span>Stáhnout WAV</span>
         </a>
-      )}
+      ) : null}
     </div>
   );
 }

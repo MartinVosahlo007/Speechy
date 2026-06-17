@@ -5,7 +5,7 @@
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Předčítač Českého Textu - TTS Server      ║"
 echo "║   Model: k2-fsa/OmniVoice                   ║"
-echo "║   Port: 8000                                ║"
+echo "║   Port: 18100                               ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 echo "První spuštění může trvat déle kvůli přípravě modelu."

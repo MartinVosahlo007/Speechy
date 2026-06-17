@@ -1,17 +1,24 @@
 import { clampChunkIndex } from "../domain/chunkSelection";
-import type { Health, PlaybackState, ReaderProgress, ServerStatus, Voice } from "../domain/types";
+import type { Health, PlaybackState, ProjectSummary, ReaderProgress, ServerStatus, TtsProviderId, Voice } from "../domain/types";
+import type { ReaderWorkflowStage } from "../domain/workflow";
 import type { ReaderAction } from "./readerActions";
 
 export type ReaderState = {
   text: string;
   playbackState: PlaybackState;
+  workflowStage: ReaderWorkflowStage;
   serverStatus: ServerStatus;
   health: Health | null;
   error: string | null;
   speed: number;
   volume: number;
   textScale: number;
+  selectedProvider: TtsProviderId;
   selectedVoice: string;
+  isBlockMode: boolean;
+  blockVoices: string[];
+  currentProjectId: string | null;
+  projects: ProjectSummary[];
   voices: Voice[];
   uploading: boolean;
   selectedChunk: number;
@@ -21,18 +28,33 @@ export type ReaderState = {
 export const initialReaderState: ReaderState = {
   text: "Ahoj. Napiš cokoliv a já to přečtu pomocí OmniVoice.",
   playbackState: "idle",
+  workflowStage: "editing",
   serverStatus: "checking",
   health: null,
   error: null,
   speed: 1,
   volume: 1,
   textScale: 0.35,
+  selectedProvider: "omnivoice",
   selectedVoice: "speaker.wav",
+  isBlockMode: false,
+  blockVoices: [],
+  currentProjectId: null,
+  projects: [],
   voices: [],
   uploading: false,
   selectedChunk: 0,
   progress: null,
 };
+
+export function createInitialReaderState(
+  overrides?: Partial<Pick<ReaderState, "text" | "speed" | "volume" | "textScale" | "selectedProvider" | "selectedVoice" | "currentProjectId">>,
+): ReaderState {
+  return {
+    ...initialReaderState,
+    ...overrides,
+  };
+}
 
 export function readerReducer(state: ReaderState, action: ReaderAction): ReaderState {
   switch (action.type) {
@@ -46,14 +68,33 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
       return { ...state, volume: action.payload };
     case "textScale/set":
       return { ...state, textScale: action.payload };
+    case "provider/set":
+      return { ...state, selectedProvider: action.payload };
     case "voice/set":
       return { ...state, selectedVoice: action.payload };
+    case "blockMode/set":
+      return { ...state, isBlockMode: action.payload };
+    case "blockVoices/set":
+      return { ...state, blockVoices: action.payload };
+    case "blockVoice/set":
+      return {
+        ...state,
+        blockVoices: state.blockVoices.map((voice, index) =>
+          index === action.payload.index ? action.payload.voice : voice,
+        ),
+      };
+    case "project/current":
+      return { ...state, currentProjectId: action.payload };
+    case "projects/set":
+      return { ...state, projects: action.payload };
     case "voices/set":
       return { ...state, voices: action.payload };
     case "server/status":
       return { ...state, serverStatus: action.payload.status, health: action.payload.health };
     case "playback/state":
       return { ...state, playbackState: action.payload };
+    case "workflow/stage":
+      return { ...state, workflowStage: action.payload };
     case "chunk/select":
       return { ...state, selectedChunk: Math.max(action.payload, 0) };
     case "progress/set":

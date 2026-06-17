@@ -1,0 +1,2 @@
+# Volitelné — jen pokud chcete v UI přepínat na Supertonic TTS
+supertonic>=1.3.1

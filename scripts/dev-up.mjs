@@ -1,21 +1,104 @@
 import { spawn } from "node:child_process";
+import net from "node:net";
 import path from "node:path";
 import readline from "node:readline";
 import process from "node:process";
 
 const rootDir = process.cwd();
 const backendDir = path.join(rootDir, "tts-server");
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const nextBin = path.join(rootDir, "node_modules", "next", "dist", "bin", "next");
 const pythonCommand = process.platform === "win32" ? "python" : "python3";
+const defaultBackendPort = Number.parseInt(process.env.SPEECHY_BACKEND_PORT ?? "", 10) || 18100;
+const defaultFrontendPort = Number.parseInt(process.env.SPEECHY_FRONTEND_PORT ?? "", 10) || 3417;
 
 const urls = {
-  backend: "http://localhost:8000",
-  frontend: "http://localhost:3000",
-  health: "http://localhost:8000/api/health",
+  backend: `http://localhost:${defaultBackendPort}`,
+  health: `http://localhost:${defaultBackendPort}/api/health`,
 };
 
 const children = [];
 let shuttingDown = false;
+
+function hasLocalListener(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ port, host: "127.0.0.1" });
+    let settled = false;
+
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+
+    socket.setTimeout(500);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
+function canBindPortOnHost(port, host) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    let settled = false;
+
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      if (!server.listening) {
+        resolve(value);
+        return;
+      }
+      server.close(() => resolve(value));
+    };
+
+    server.unref();
+
+    server.once("error", (error) => {
+      if (error && typeof error === "object" && "code" in error) {
+        if (error.code === "EADDRINUSE" || error.code === "EACCES") {
+          done(false);
+          return;
+        }
+      }
+      done(false);
+    });
+
+    server.once("listening", () => {
+      done(true);
+    });
+
+    try {
+      server.listen({ port, host, exclusive: true });
+    } catch {
+      done(false);
+    }
+  });
+}
+
+async function checkPortAvailable(port) {
+  if (await hasLocalListener(port)) return false;
+  return canBindPortOnHost(port, "0.0.0.0");
+}
+
+async function findFreePort(startPort, endPort = startPort + 50) {
+  for (let port = startPort; port <= endPort; port += 1) {
+    // Keep the search narrow so dev-up still fails fast if the range is exhausted.
+    // We only need a nearby free port for local development.
+    if (await checkPortAvailable(port)) return port;
+  }
+  return null;
+}
+
+async function isHealthy(url) {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
 
 function pipeOutput(label, stream) {
   if (!stream) return;
@@ -49,7 +132,7 @@ function startProcess({ label, command, args, cwd }) {
   const child = spawn(command, args, {
     cwd,
     env: process.env,
-    shell: process.platform === "win32",
+    shell: false,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -75,21 +158,54 @@ function startProcess({ label, command, args, cwd }) {
 
 console.log("Starting local development stack");
 console.log(`Backend URL: ${urls.backend}`);
-console.log(`Frontend URL: ${urls.frontend}`);
+console.log(`Frontend URL: will be selected automatically starting at http://localhost:${defaultFrontendPort}`);
 console.log(`Health check URL: ${urls.health}`);
 console.log("Processes will stop together if one crashes.");
 
-startProcess({
-  label: "backend",
-  command: pythonCommand,
-  args: ["server.py"],
-  cwd: backendDir,
-});
+const backendPortAvailable = await checkPortAvailable(defaultBackendPort);
+const backendAlreadyRunning = !backendPortAvailable && (await isHealthy(urls.health));
+
+if (!backendPortAvailable && !backendAlreadyRunning) {
+  console.error(`Cannot start the backend because port ${defaultBackendPort} is already in use by another process.`);
+  console.error(`Stop the existing service on port ${defaultBackendPort} or set SPEECHY_BACKEND_PORT before retrying.`);
+  process.exit(1);
+}
+
+if (!backendAlreadyRunning) {
+  startProcess({
+    label: "backend",
+    command: pythonCommand,
+    args: ["server.py"],
+    cwd: backendDir,
+  });
+} else {
+  console.log(`Reusing the backend already running on port ${defaultBackendPort}.`);
+}
+
+const frontendPort = (await findFreePort(defaultFrontendPort)) ?? null;
+if (!frontendPort) {
+  console.error(`Cannot find a free frontend port starting from ${defaultFrontendPort}.`);
+  process.exit(1);
+}
+
+const frontendUrl = `http://localhost:${frontendPort}`;
+console.log(`Frontend will use: ${frontendUrl}`);
 
 startProcess({
   label: "frontend",
-  command: npmCommand,
-  args: ["run", "dev"],
+  command: process.execPath,
+  args: [
+    "scripts/run-with-log.mjs",
+    "dev.log",
+    process.execPath,
+    nextBin,
+    "dev",
+    "--turbopack",
+    "-H",
+    "0.0.0.0",
+    "-p",
+    String(frontendPort),
+  ],
   cwd: rootDir,
 });
 

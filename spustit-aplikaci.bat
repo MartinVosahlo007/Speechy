@@ -15,9 +15,9 @@ if errorlevel 1 (
 )
 
 echo Spoustim aplikaci...
-echo Frontend: http://localhost:3000
-echo Backend:  http://localhost:8000
-echo Health:   http://localhost:8000/api/health
+echo Frontend: http://localhost:3417
+echo Backend:  http://localhost:18100
+echo Health:   http://localhost:18100/api/health
 echo.
 
 node scripts\dev-up.mjs

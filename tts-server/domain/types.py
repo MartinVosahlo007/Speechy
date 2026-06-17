@@ -19,6 +19,7 @@ class RenderBlock(TypedDict):
 class Job(TypedDict):
     id: str
     status: str
+    provider: str
     voice: str
     text: str
     language: str
