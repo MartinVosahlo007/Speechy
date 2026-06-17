@@ -87,7 +87,11 @@ architecture-report.md
 .cursor/*.log
 .codex/*
 !.codex/skills/
-!.codex/skills/**
+.codex/skills/*
+!.codex/skills/karpathy-guidelines/
+!.codex/skills/karpathy-guidelines/**
+!.codex/skills/pragmatic-superpowers/
+!.codex/skills/pragmatic-superpowers/**
 .planning/
 .agents/
 
